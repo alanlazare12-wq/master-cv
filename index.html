@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <meta name="color-scheme" content="light dark">
+  <link rel="manifest" href="manifest.webmanifest?v=48-mcp20">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css?v=48-mcp20">
+  <style id="runtimePrintPageStyle"></style>
+  <title>Hoja Personal · CV Studio v48</title>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span>H</span><div><b>Hoja Personal</b><small>CV Studio · Local</small></div></div>
+  <div class="top-doc"><input id="docTitle" aria-label="Nombre del currículum"><span id="saveState">Guardado localmente</span></div>
+  <div class="top-actions"><button id="previewMobileBtn" class="preview-mobile-toggle" title="Abrir vista previa" aria-label="Abrir vista previa" aria-controls="previewPane" aria-expanded="false">▣</button><button id="uiModeBtn" title="Alternar modo Rápido/Pro" aria-pressed="false">Rápido</button><button id="focusBtn" title="Modo Focus" aria-pressed="false">◎ Focus</button><button id="themeBtn" title="Tema" aria-label="Activar tema oscuro" aria-pressed="false">◐</button><button id="quickAts" aria-label="Abrir análisis ATS">ATS <b id="scorePill">—</b></button><button class="primary" id="pdfBtn" title="Exportar PDF" aria-label="Exportar PDF">Exportar PDF</button></div>
+</header>
+<div id="tabConflictBar" class="tab-conflict-bar hidden" role="alert"><div><b>Conflicto entre pestañas</b><span>Este CV cambió en otra pestaña. Puedes recargar, conservar ambas versiones o aplicar sólo tus cambios a este CV sin borrar otros documentos.</span></div><div class="tab-conflict-actions"><button id="tabConflictReload">Recargar guardado</button><button id="tabConflictFork">Conservar ambos</button><button id="tabConflictContinue" class="primary">Usar mi versión</button></div></div>
+<main class="shell">
+  <aside class="sidebar">
+    <nav id="mainNav">
+      <button data-view="home" class="active" aria-label="Mis currículums" aria-current="page">⌂ <span>Mis CV</span></button>
+      <button data-view="editor" aria-label="Editor">✎ <span>Editor</span></button>
+      <button data-view="studio" aria-label="Studio Pro">◫ <span>Studio Pro</span></button>
+      <button data-view="templates" aria-label="Plantillas">▦ <span>Plantillas</span><em>528</em></button>
+      <button data-view="workbench" aria-label="Workbench">◉ <span>Workbench</span></button>
+      <button data-view="aicreator" aria-label="Crear con IA">✦ <span>Crear con IA</span></button>
+      <button data-view="quality" aria-label="Copiloto IA">◇ <span>Copiloto IA</span></button>
+      <button data-view="chatgpt" aria-label="ChatGPT Web Bridge">⇄ <span>ChatGPT Web</span></button>
+      <button data-view="ats" aria-label="Análisis ATS">◎ <span>Análisis ATS</span></button>
+      <button data-view="target" aria-label="Vacante objetivo">🎯 <span>Vacante objetivo</span></button>
+      <button data-view="export" aria-label="Importar o exportar">⇩ <span>Importar / Exportar</span></button>
+    </nav>
+    <div class="side-local"><b>100% local por defecto</b><p>Tus CV se guardan en este navegador. El bridge ChatGPT Web es opcional y requiere activación explícita.</p><span id="onlineState">● Local</span></div>
+  </aside>
+
+  <section class="workspace">
+    <div id="home" class="view"></div>
+    <div id="editor" class="view hidden"></div>
+    <div id="studio" class="view hidden"></div>
+    <div id="templates" class="view hidden"></div>
+    <div id="workbench" class="view hidden"></div>
+    <div id="aicreator" class="view hidden"></div>
+    <div id="quality" class="view hidden"></div>
+    <div id="chatgpt" class="view hidden"></div>
+    <div id="ats" class="view hidden"></div>
+    <div id="target" class="view hidden"></div>
+    <div id="export" class="view hidden"></div>
+  </section>
+
+  <aside id="previewPane" class="preview-pane" aria-labelledby="previewTitle">
+    <div class="preview-toolbar">
+      <button id="previewCloseBtn" class="preview-close" title="Cerrar vista previa" aria-label="Cerrar vista previa">×</button><div><b id="previewTitle">Vista previa</b><small id="templateLabel">—</small></div>
+      <div class="segmented preview-kind"><button data-preview="human" class="active" aria-pressed="true">Humano</button><button data-preview="ats" aria-pressed="false">ATS</button></div><div class="segmented preview-surface"><button data-preview-surface="editor" class="active" aria-pressed="true">Editor</button><button data-preview-surface="export" aria-pressed="false">Exportación</button></div><button id="previewEditBtn" class="preview-edit-toggle active" title="Editar directamente en la vista previa" aria-pressed="true">Editar ✓</button>
+      <div class="zoom"><button id="zoomFitPage" title="Ajustar hoja completa">Hoja</button><button id="zoomFitWidth" title="Ajustar al ancho del panel">Ancho</button><button id="zoomOut" aria-label="Alejar vista previa">−</button><span id="zoomLabel">82%</span><button id="zoomIn" aria-label="Acercar vista previa">＋</button></div>
+    </div>
+    <div id="previewEditBar" class="preview-editbar">
+      <span id="previewEditHint">Clic para editar · selecciona y arrastra el bloque · ⠿ es opcional</span>
+      <div class="preview-history"><button id="previewUndoBtn" title="Deshacer último cambio de la preview" disabled>↶</button><button id="previewRedoBtn" title="Rehacer" disabled>↷</button></div>
+      <select id="previewAddSelect" aria-label="Añadir desde la vista previa"><option value="">＋ Añadir…</option><option value="summary">Perfil profesional</option><option value="experience">Experiencia</option><option value="education">Educación</option><option value="skillGroups">Grupo de habilidades</option><option value="projects">Proyecto</option><option value="certifications">Certificación</option><option value="languages">Idioma</option><option value="achievements">Logro</option></select>
+      <select id="previewHiddenSelect" aria-label="Restaurar sección"><option value="">Restaurar sección…</option></select>
+    </div>
+    <div class="paper-stage"><article id="resumePaper" class="resume-paper"></article><pre id="atsPaper" class="ats-paper hidden"></pre><div id="exportPreviewHost" class="export-preview-host hidden" aria-label="Vista previa exacta de exportación"><div id="exportPreviewScaler" class="export-preview-scaler"><iframe id="exportPreviewFrame" class="export-preview-frame" title="Documento final de exportación" tabindex="-1"></iframe></div></div></div>
+  </aside>
+</main>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<script type="module" src="src/app.js?v=48-mcp20"></script>
+</body>
+</html>

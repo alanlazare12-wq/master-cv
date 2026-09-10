@@ -1,0 +1,10 @@
+{
+  "name": "Hoja Personal · CV Studio v48",
+  "short_name": "Hoja CV",
+  "description": "Herramienta local para crear CV ATS y visuales con 528 presets, Template Forge, IA local opcional, Resume Workbench, Release Gate y Test Lab.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3f5f7",
+  "theme_color": "#111827",
+  "lang": "es-MX"
+}

@@ -1,0 +1,23 @@
+﻿# Runtime and tokens
+.hoja-server.pid
+.hoja-server.token
+*.pid
+*.token
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# System and logs
+*.log
+.DS_Store
+Thumbs.db
