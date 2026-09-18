@@ -20,6 +20,8 @@ pnpm-debug.log*
 # Generated / local runtimes
 Python/
 graphify-out/
+build/
+dist/
 
 # System and logs
 *.log
