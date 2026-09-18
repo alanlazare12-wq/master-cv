@@ -31,6 +31,7 @@ export function normalizeDurableEnvelope(value){
   // v44/v45 stored {savedAt,state}. Promote it without invalidating existing recovery data.
   if(value.state&&typeof value.state==='object'&&!Array.isArray(value.state)){
     const envelope={schema:num(value.schema)||1,revision:Math.max(0,Math.trunc(num(value.revision))),savedAt:Math.max(num(value.savedAt),stateLatestTimestamp(value.state)),appVersion:String(value.appVersion||''),digest:String(value.digest||''),state:value.state};
+    if(envelope.schema>ENVELOPE_SCHEMA)return null;
     if(envelope.digest&&envelope.digest!==jsonDigest(envelope.state))return null;
     return envelope;
   }

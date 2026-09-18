@@ -1,9 +1,9 @@
 # QA Report · Hoja Personal CV Studio v48
 
 ## Resultado del gate
-- JavaScript: **747 / 747 PASS** (66 smoke/UI + 681 dominio).
-- Python: la suite actual descubre **113 casos**. En LocalForge se ejecutaron **111**: **110 PASS + 1 skip** de plataforma; 2 pruebas que crean procesos hijo se excluyeron por confinamiento del runtime.
-- ChatGPT Web / MCP: **3 / 3 pruebas de servidor PASS** + **2 / 2 pruebas JS de snapshot/comandos PASS**.
+- JavaScript: **770 / 770 PASS**.
+- Python: **126 casos descubiertos**: **125 PASS + 1 skip** de plataforma.
+- ChatGPT Web / MCP: suite de servidor/JS PASS y conexión E2E real verificada desde **PraxisNode** contra `/mcp` usando el protocolo MCP moderno.
 - Sintaxis: `npm run check` PASS, incluyendo `sw.js`, todos los módulos JS y `py_compile` de `server.py`, parser y `mcp_bridge.py`.
 - Fuzzing incluido: **120 escenarios** de resolución de conflicto `fork`/`replace`.
 
@@ -11,15 +11,17 @@
 - Bridge **opt-in**: apagado por defecto.
 - Endpoint MCP local: `/mcp` sobre el mismo servidor `127.0.0.1:4173`.
 - Snapshot sanitizado: excluye foto, historiales, Workbench, evidence vault y blobs auxiliares.
-- Modo **Solo lectura** anuncia únicamente `cv_get_current` y `cv_get_bridge_status`.
+- Modo **Solo lectura** anuncia `cv_get_current`, `cv_get_bridge_status` y `cv_get_edit_schema`; no expone herramientas de propuesta.
 - Modo **Proponer cambios** añade propuestas de perfil/bullet, pero nunca escribe directamente en IndexedDB.
-- Toda propuesta vuelve a pasar por `auditLocalAiSuggestion()` y `applyLocalAiSuggestion()` con revisión humana cuando corresponde.
+- Las propuestas de resumen/bullets pasan por la auditoría factual local; las ediciones estructurales siempre requieren revisión/aprobación local antes de guardar.
 - `CONTROL_PLANE_API_KEY` no se solicita ni se persiste en Hoja Personal.
-- **Túnel compartido LocalForge:** el perfil `localforge` publica ahora `hoja_personal.*`; no se requiere segundo `tunnel-client` ni Tunnel ID.
-- E2E verificado: snapshot de prueba leído correctamente por `LocalForge MCP → hoja_personal.cv_get_current → Hoja Personal`; tras desactivar el bridge, la misma llamada fue rechazada.
-- LocalForge MCP/policy regression: **21 / 21 PASS**.
+- **PraxisNode:** el bridge ya no depende del puerto/perfil heredado. Detecta la instancia default local en `127.0.0.1:47321` sin confundir “listener disponible” con “túnel conectado”.
+- E2E verificado: PraxisNode conectó directamente al MCP local de Hoja Personal, descubrió herramientas y ejecutó `cv_get_bridge_status` con protocolo `2026-07-28`.
+- Compatibilidad MCP: servidor stateless moderno con compatibilidad explícita para clientes 2025 soportados.
+- **Superficie HTTP endurecida:** el servidor estático sólo sirve `index.html`, `styles.css`, `manifest.webmanifest`, `sw.js` y `src/*.js`; código Python, `.git`, tests y documentación ya no quedan expuestos por GET/HEAD.
+- **Repo más liviano:** el runtime Python embebido (~162 MB, 2,725 archivos) salió del índice Git; `tools/run-python.mjs` selecciona Python 3.10+ del sistema y evita reutilizar ese runtime local.
 - Edición remota ampliada: `cv_get_edit_schema` + `cv_propose_edit` con allowlist, operaciones `set/upsert/delete`, validación de diseño y bloqueo de propuestas obsoletas.
-- E2E de edición genérica: propuesta no-op enviada por LocalForge, rechazada y verificada sin cambios en el CV y con **0 pendientes**.
+- E2E de edición genérica: propuesta no-op enviada por el cliente MCP, rechazada y verificada sin cambios en el CV y con **0 pendientes**.
 - Preview/PDF parity: nueva superficie **Editor / Exportación**. La vista Exportación reutiliza el perfil `print-one-page`, oculta edición/guías y refleja la compactación final del PDF.
 - Regresión de paginación: el CV de 323 palabras se valida en una sola página y las secciones largas pueden continuar en la hoja sin generar huecos artificiales.
 - **Resume Intelligence:** CV Score compuesto, checklist de envío, Impact Lab, Interview Coach, fit dinámico y nombre profesional de archivo.
@@ -122,7 +124,7 @@ Se intentó automatización E2E con Chromium/Playwright, pero la política admin
 - El mismo `exportDocumentSpec()` alimenta la vista exacta y el payload de PDF directo.
 - Edge real mcp13: **11/11 vistas**, **0 excepciones JS**, **0 warnings/errors**, iframe con **0 controles editables**, 2 hojas de estilo cargadas y tamaño A4 físico 793.69 × 1122.52 px.
 - CV actual `Alan Lazare | Desarrollador Full Stack`, `portrait-modern-terracotta`, 323 palabras: documento exacto generado e impreso en **1 página física**.
-- Gate: **747/747 JS PASS**; Python: **110 PASS + 1 skip** de plataforma (2 tests de procesos hijo excluidos por confinamiento LocalForge).
+- Gate histórico mcp13: supersedido por el gate actual de esta rama: **770/770 JS PASS** y **125 PASS + 1 skip** en Python.
 - Cache bust: **48-mcp13**.
 
 
@@ -133,7 +135,7 @@ Se intentó automatización E2E con Chromium/Playwright, pero la política admin
 - Edge real: limpio vs editable dio **0 px de diferencia** en X/Y/ancho/alto para hoja, nombre, resumen, experiencia, educación, habilidades e idiomas. La hoja se mantuvo en **793.688 × 1122.516 px (A4)**.
 - Prueba funcional Edge: edición de nombre persistió; duplicar experiencia cambió 1 → 2; consola sin errores.
 - Prueba de impresión Edge: editable **29 campos / 16 controles** → limpio **0 / 0** → `print()` sobre limpio → restauración automática a editable **29 / 16**.
-- Gate final: **747/747 JS PASS**; Python **110 PASS + 1 skip** de plataforma.
+- Gate histórico mcp14: supersedido por el gate actual de esta rama: **770/770 JS PASS** y **125 PASS + 1 skip** en Python.
 - Cache bust: **48-mcp14**.
 
 
@@ -143,4 +145,4 @@ Se intentó automatización E2E con Chromium/Playwright, pero la política admin
 - El mismo factor se comparte con iframe exacto, diálogo clásico y PDF directo.
 - CV actual `Alan Lazare | Desarrollador Full Stack`, `portrait-modern-terracotta`: ocupación útil ~56.7% → ~92.7%, factor ~144%, ~66.6 px de aire inferior restante.
 - Validación real: PDF clásico **1 página**; PDF directo **1 página**.
-- Gate mcp16: **748/748 JS PASS**; Python **112 PASS + 1 skip** de plataforma.
+- Gate histórico mcp16: supersedido por el gate actual de esta rama: **770/770 JS PASS** y **125 PASS + 1 skip** en Python.

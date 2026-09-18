@@ -15,7 +15,7 @@ export const FORGE_TOKENS={
   lineHeight:['compact','normal','relaxed'],
   paper:['a4','letter']
 };
-const DESIGN_KEYS=['accent','font','layout','density','margin','fontScale','lineHeight','paper','headerStyle','headingStyle','dividerStyle','contactStyle','showPhoto','photoShape','photoPosition','photoSize'];
+const DESIGN_KEYS=['accent','font','layout','density','margin','fontScale','lineHeight','paper','headerStyle','headingStyle','dividerStyle','contactStyle','showIcons','showPhoto','photoShape','photoPosition','photoSize','photoZoom','photoX','photoY'];
 const facts=r=>{const basics={...(r.basics||{})};delete basics.photo;return JSON.stringify({basics,summary:r.summary,experience:r.experience,education:r.education,skillGroups:r.skillGroups,projects:r.projects,certifications:r.certifications,languages:r.languages,achievements:r.achievements,genericSections:r.genericSections,customSections:r.customSections})};
 const safeName=s=>String(s||'Mi plantilla').trim().slice(0,80)||'Mi plantilla';
 const safeHex=(v,fallback='#111827')=>/^#[0-9a-f]{6}$/i.test(String(v||''))?String(v):fallback;
@@ -36,16 +36,20 @@ export function normalizeThemeRecipe(raw={}){
     headingStyle:FORGE_TOKENS.headingStyle.includes(o.headingStyle)?o.headingStyle:'line',
     dividerStyle:FORGE_TOKENS.dividerStyle.includes(o.dividerStyle)?o.dividerStyle:'light',
     contactStyle:FORGE_TOKENS.contactStyle.includes(o.contactStyle)?o.contactStyle:'inline',
+    showIcons:typeof o.showIcons==='boolean'?o.showIcons:true,
     showPhoto:typeof o.showPhoto==='boolean'?o.showPhoto:!!base.photoFriendly,
     photoShape:FORGE_TOKENS.photoShape.includes(o.photoShape)?o.photoShape:(base.photoShape||'circle'),
     photoPosition:FORGE_TOKENS.photoPosition.includes(o.photoPosition)?o.photoPosition:(base.photoPosition||'left'),
-    photoSize:FORGE_TOKENS.photoSize.includes(o.photoSize)?o.photoSize:(base.photoSize||'medium')
+    photoSize:FORGE_TOKENS.photoSize.includes(o.photoSize)?o.photoSize:(base.photoSize||'medium'),
+    photoZoom:Math.max(1,Math.min(2.5,Number(o.photoZoom)||1)),
+    photoX:Math.max(-50,Math.min(50,Number(o.photoX)||0)),
+    photoY:Math.max(-50,Math.min(50,Number(o.photoY)||0))
   };
   return{id:safeRecipeId(raw.id),version:FORGE_VERSION,name:safeName(raw.name),baseId:base.id,createdAt:Number(raw.createdAt)||Date.now(),updatedAt:Number(raw.updatedAt)||Date.now(),overrides};
 }
 export function createThemeRecipe(baseId,name,overrides={}){return normalizeThemeRecipe({baseId,name,overrides})}
 export function cloneThemeRecipe(recipe,name){const x=normalizeThemeRecipe(recipe);return normalizeThemeRecipe({...clone(x),id:'',name:name||`${x.name} · copia`,createdAt:Date.now(),updatedAt:Date.now()})}
-export function validateThemeRecipe(recipe){const r=normalizeThemeRecipe(recipe),issues=[];if(!recipe?.name?.trim())issues.push('Añade un nombre.');if(!templateById(r.baseId))issues.push('Preset base inválido.');return{ok:issues.length===0,issues,recipe:r}}
+export function validateThemeRecipe(recipe){const r=normalizeThemeRecipe(recipe),issues=[],rawBase=String(recipe?.baseId||'').trim();if(!recipe?.name?.trim())issues.push('Añade un nombre.');if(rawBase&&templateById(rawBase).id!==rawBase)issues.push('Preset base inválido.');return{ok:issues.length===0,issues,recipe:r}}
 export function applyThemeRecipe(resume,recipe){const r=normalizeThemeRecipe(recipe),before=facts(resume);applyTemplateToResume(resume,r.baseId);for(const k of DESIGN_KEYS)resume.settings[k]=clone(r.overrides[k]);resume.settings.forgeRecipeId=r.id;resume.settings.forgeRecipeName=r.name;resume.settings.forgeRecipeVersion=r.version;if(facts(resume)!==before)throw new Error('Template Forge changed resume facts');return r}
 export function recipeFromResume(resume,name='Mi plantilla'){const t=templateById(resume.settings?.templateId);const o={};for(const k of DESIGN_KEYS)o[k]=clone(resume.settings?.[k]);return createThemeRecipe(t.id,name,o)}
 export function recipeSummary(recipe){const r=normalizeThemeRecipe(recipe),base=templateById(r.baseId);return{name:r.name,base:base.name,layout:r.overrides.layout,font:r.overrides.font,accent:r.overrides.accent,risk:r.overrides.layout==='dual'?(base.risk==='high'?'high':'medium'):base.risk}}

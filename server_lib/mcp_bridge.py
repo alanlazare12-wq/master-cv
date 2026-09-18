@@ -1,8 +1,12 @@
 from __future__ import annotations
-import json, shutil, socket, threading, time, uuid
+import json, socket, threading, time, uuid
 
 MAX_MCP_BODY=2*1024*1024
-MCP_PROTOCOL_VERSION="2025-06-18"
+MCP_PROTOCOL_VERSION="2026-07-28"
+MCP_SUPPORTED_VERSIONS=(MCP_PROTOCOL_VERSION,"2025-11-25","2025-06-18","2025-03-26")
+MCP_LEGACY_DEFAULT_VERSION="2025-11-25"
+PRAXISNODE_DEFAULT_MCP_ENDPOINT="http://127.0.0.1:47321/mcp"
+PRAXISNODE_DEFAULT_TUNNEL_PROFILE="praxisnode"
 _LOCK=threading.RLock()
 _STATE={"enabled":False,"snapshot":None,"updatedAt":0,"tabId":"","mode":"read","pending":[],"lastMcpAt":0}
 _EXCLUDED={"photo","versions","autoVersions","workbench","evidenceVault","reviewThreads","collaboration","sourceAudit"}
@@ -42,9 +46,15 @@ def _clean(v,depth=0):
         return out
     return str(v)[:2000]
 
-def _localforge_shared_tunnel_available():
+def _praxisnode_default_available():
+    """Best-effort detection of the default PraxisNode MCP listener.
+
+    A listening socket proves only that the default local MCP endpoint is reachable;
+    it deliberately does not claim that PraxisNode's OpenAI tunnel is connected.
+    Secondary PraxisNode instances use their own dynamically assigned ports.
+    """
     try:
-        with socket.create_connection(("127.0.0.1",47322),timeout=0.15):
+        with socket.create_connection(("127.0.0.1",47321),timeout=0.15):
             return True
     except OSError:
         return False
@@ -52,7 +62,7 @@ def _localforge_shared_tunnel_available():
 def bridge_status():
     with _LOCK:
         snap=_STATE.get("snapshot") or {};resume=snap.get("resume") or {}
-        return {"available":True,"enabled":bool(_STATE.get("enabled")),"mcpEndpoint":"http://127.0.0.1:4173/mcp","protocolVersion":MCP_PROTOCOL_VERSION,"snapshotReady":bool(resume),"resumeId":str(resume.get("id") or ""),"resumeTitle":str(resume.get("title") or ""),"updatedAt":int(_STATE.get("updatedAt") or 0),"mode":_STATE.get("mode") or "approve","pendingCount":len(_STATE.get("pending") or []),"lastMcpAt":int(_STATE.get("lastMcpAt") or 0),"tunnelClientInstalled":bool(shutil.which("tunnel-client")),"localForgeSharedTunnel":_localforge_shared_tunnel_available(),"localForgeMcpEndpoint":"http://127.0.0.1:47322/mcp","sharedTunnelProfile":"localforge","writePolicy":"local-approval-required"}
+        return {"available":True,"enabled":bool(_STATE.get("enabled")),"mcpEndpoint":"http://127.0.0.1:4173/mcp","protocolVersion":MCP_PROTOCOL_VERSION,"supportedProtocolVersions":list(MCP_SUPPORTED_VERSIONS),"snapshotReady":bool(resume),"resumeId":str(resume.get("id") or ""),"resumeTitle":str(resume.get("title") or ""),"updatedAt":int(_STATE.get("updatedAt") or 0),"mode":_STATE.get("mode") or "approve","pendingCount":len(_STATE.get("pending") or []),"lastMcpAt":int(_STATE.get("lastMcpAt") or 0),"praxisNodeDefaultDetected":_praxisnode_default_available(),"praxisNodeDefaultMcpEndpoint":PRAXISNODE_DEFAULT_MCP_ENDPOINT,"praxisNodeTunnelProfile":PRAXISNODE_DEFAULT_TUNNEL_PROFILE,"praxisNodeDetectionScope":"default-instance-local-mcp-only","writePolicy":"local-approval-required"}
 
 def bridge_sync(body):
     if not isinstance(body,dict):raise ValueError("Snapshot MCP inválido.")
@@ -64,12 +74,13 @@ def bridge_sync(body):
     except (TypeError,ValueError):score=0
     snap={"resume":clean,"atsText":str(body.get("atsText") or "")[:120000],"atsScore":score,"jobMatch":_clean(body.get("jobMatch")),"syncedAt":int(time.time()*1000)}
     with _LOCK:
+        _STATE["pending"]=[item for item in (_STATE.get("pending") or []) if str(item.get("resumeId") or "")==rid]
         _STATE["enabled"]=True;_STATE["snapshot"]=snap;_STATE["updatedAt"]=snap["syncedAt"];_STATE["tabId"]=str(body.get("tabId") or "")[:120];_STATE["mode"]="read" if body.get("mode")=="read" else "approve"
     return bridge_status()
 
 def bridge_disable():
     with _LOCK:
-        _STATE["enabled"]=False;_STATE["snapshot"]=None;_STATE["updatedAt"]=0;_STATE["tabId"]=""
+        _STATE["enabled"]=False;_STATE["snapshot"]=None;_STATE["updatedAt"]=0;_STATE["tabId"]="";_STATE["pending"]=[]
     return bridge_status()
 
 def bridge_pending():
@@ -148,7 +159,7 @@ def _validate_edit_payload(path,value):
     if path in _EDIT_COLLECTIONS or path in _EDIT_SUBCOLLECTIONS:
         if not isinstance(value,dict):raise ValueError("La operación requiere un objeto JSON.")
         clean=_clean(value)
-        if path=="experience.bullets":
+        if path in {"experience.bullets","projects.bullets"}:
             allowed={"id","text"}
         else:
             allowed={
@@ -181,14 +192,14 @@ def _queue_edit(args):
             before=_scalar_value(resume,path);after=value
         elif op=="upsert":
             if path not in _EDIT_COLLECTIONS|_EDIT_SUBCOLLECTIONS:raise ValueError("Colección no permitida.")
-            if path in {"experience.bullets","projects.bullets"} and not parent_id:raise ValueError("parent_id de experiencia requerido.")
+            if path in {"experience.bullets","projects.bullets"} and not parent_id:raise ValueError("parent_id del elemento padre requerido para bullets.")
             value=_validate_edit_payload(path,_parse_edit_value(args.get("value_json","")))
             if item_id:value["id"]=item_id
             before=_collection_item(resume,path,item_id,parent_id) if item_id else None;after=value
         else:
             if path not in _EDIT_COLLECTIONS|_EDIT_SUBCOLLECTIONS:raise ValueError("Colección no permitida.")
             if not item_id:raise ValueError("item_id requerido para eliminar.")
-            if path in {"experience.bullets","projects.bullets"} and not parent_id:raise ValueError("parent_id de experiencia requerido.")
+            if path in {"experience.bullets","projects.bullets"} and not parent_id:raise ValueError("parent_id del elemento padre requerido para bullets.")
             before=_collection_item(resume,path,item_id,parent_id)
             if before is None:raise ValueError("El elemento a eliminar no existe en el snapshot actual.")
             after=None
@@ -254,16 +265,82 @@ def _call_tool(name,args):
         except ValueError as exc:return _result({"error":str(exc)},True)
     return _result({"error":f"Herramienta MCP desconocida: {name}"},True)
 
-def mcp_handle(message,app_version):
-    if not isinstance(message,dict) or message.get("jsonrpc")!="2.0":return {"jsonrpc":"2.0","id":message.get("id") if isinstance(message,dict) else None,"error":{"code":-32600,"message":"Invalid Request"}}
+_MCP_INSTRUCTIONS="Lee el CV con cv_get_current. Las herramientas cv_propose_* nunca escriben directamente: crean propuestas que el usuario debe revisar y aprobar localmente."
+
+def _rpc_error(rid,code,message,data=None):
+    error={"code":code,"message":message}
+    if data is not None:error["data"]=data
+    return {"jsonrpc":"2.0","id":rid,"error":error}
+
+def _header(headers,name):
+    if headers is None:return ""
+    try:return str(headers.get(name) or headers.get(name.lower()) or "")
+    except (AttributeError,TypeError):return ""
+
+def _server_meta(app_version):
+    return {"io.modelcontextprotocol/serverInfo":{"name":"hoja-personal-cv-studio","version":app_version}}
+
+def _modern_protocol_error(params):
+    meta=params.get("_meta") if isinstance(params,dict) else None
+    if not isinstance(meta,dict):return (-32602,"Missing required MCP request _meta.",None)
+    version=meta.get("io.modelcontextprotocol/protocolVersion")
+    if not isinstance(version,str):return (-32602,"Missing MCP protocol version metadata.",None)
+    if version!=MCP_PROTOCOL_VERSION:return (-32022,"Unsupported protocol version",{"supported":[MCP_PROTOCOL_VERSION],"requested":version})
+    info=meta.get("io.modelcontextprotocol/clientInfo")
+    if info is not None and (not isinstance(info,dict) or not isinstance(info.get("name"),str) or not isinstance(info.get("version"),str)):
+        return (-32602,"Invalid MCP clientInfo metadata.",None)
+    capabilities=meta.get("io.modelcontextprotocol/clientCapabilities")
+    if not isinstance(capabilities,dict):return (-32602,"Missing MCP clientCapabilities metadata.",None)
+    return None
+
+def _modern_result(payload,app_version):
+    out=dict(payload);out.setdefault("resultType","complete");out["_meta"]=_server_meta(app_version);return out
+
+def mcp_response_protocol(message,headers=None):
+    requested=_header(headers,"MCP-Protocol-Version")
+    if requested in MCP_SUPPORTED_VERSIONS:return requested
+    if isinstance(message,dict) and message.get("method")=="initialize":
+        params=message.get("params") if isinstance(message.get("params"),dict) else {}
+        version=str(params.get("protocolVersion") or "")
+        if version in MCP_SUPPORTED_VERSIONS[1:]:return version
+        return MCP_LEGACY_DEFAULT_VERSION
+    return MCP_PROTOCOL_VERSION
+
+def mcp_handle(message,app_version,headers=None):
+    if not isinstance(message,dict) or message.get("jsonrpc")!="2.0":return _rpc_error(message.get("id") if isinstance(message,dict) else None,-32600,"Invalid Request")
     rid=message.get("id");method=str(message.get("method") or "");params=message.get("params") if isinstance(message.get("params"),dict) else {}
+    requested_header=_header(headers,"MCP-Protocol-Version")
+    if requested_header and requested_header not in MCP_SUPPORTED_VERSIONS:
+        return _rpc_error(rid,-32022,"Unsupported protocol version",{"supported":list(MCP_SUPPORTED_VERSIONS),"requested":requested_header})
     if method=="initialize":
-        requested=str(params.get("protocolVersion") or "");protocol=requested if requested in {"2025-03-26","2025-06-18"} else MCP_PROTOCOL_VERSION
-        return {"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":protocol,"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"hoja-personal-cv-studio","version":app_version},"instructions":"Lee el CV con cv_get_current. Las herramientas cv_propose_* nunca escriben directamente: crean propuestas que el usuario debe revisar y aprobar localmente."}}
+        requested=str(params.get("protocolVersion") or "")
+        protocol=requested if requested in MCP_SUPPORTED_VERSIONS[1:] else MCP_LEGACY_DEFAULT_VERSION
+        return {"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":protocol,"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"hoja-personal-cv-studio","version":app_version},"instructions":_MCP_INSTRUCTIONS}}
     if method in {"notifications/initialized","notifications/cancelled"}:return None
-    if method=="ping":return {"jsonrpc":"2.0","id":rid,"result":{}}
-    if method=="tools/list":return {"jsonrpc":"2.0","id":rid,"result":{"tools":_tools()}}
+    meta=params.get("_meta") if isinstance(params,dict) else None
+    meta_version=meta.get("io.modelcontextprotocol/protocolVersion") if isinstance(meta,dict) else ""
+    modern=requested_header==MCP_PROTOCOL_VERSION or meta_version==MCP_PROTOCOL_VERSION or method=="server/discover"
+    if modern:
+        transport_method=_header(headers,"Mcp-Method")
+        if headers is not None and not transport_method:return _rpc_error(rid,-32602,"Missing required Mcp-Method header.")
+        if transport_method and transport_method!=method:return _rpc_error(rid,-32602,"Mcp-Method header does not match JSON-RPC method.")
+        rpc_name=str(params.get("name") or "") if method=="tools/call" else ""
+        transport_name=_header(headers,"Mcp-Name")
+        if headers is not None and rpc_name and not transport_name:return _rpc_error(rid,-32602,"Missing required Mcp-Name header.")
+        if transport_name and transport_name!=rpc_name:return _rpc_error(rid,-32602,"Mcp-Name header does not match tools/call name.")
+        protocol_error=_modern_protocol_error(params)
+        if protocol_error:
+            code,message_text,data=protocol_error;return _rpc_error(rid,code,message_text,data)
+    if method=="server/discover":
+        return {"jsonrpc":"2.0","id":rid,"result":_modern_result({"supportedVersions":[MCP_PROTOCOL_VERSION],"capabilities":{"tools":{"listChanged":False}},"instructions":_MCP_INSTRUCTIONS,"ttlMs":0,"cacheScope":"private"},app_version)}
+    if method=="ping" and not modern:return {"jsonrpc":"2.0","id":rid,"result":{}}
+    if method=="tools/list":
+        result={"tools":_tools()}
+        if modern:result=_modern_result({**result,"ttlMs":0,"cacheScope":"private"},app_version)
+        return {"jsonrpc":"2.0","id":rid,"result":result}
     if method=="tools/call":
         name=str(params.get("name") or "");args=params.get("arguments") if isinstance(params.get("arguments"),dict) else {}
-        return {"jsonrpc":"2.0","id":rid,"result":_call_tool(name,args)}
-    return {"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":f"Method not found: {method}"}}
+        result=_call_tool(name,args)
+        if modern:result=_modern_result(result,app_version)
+        return {"jsonrpc":"2.0","id":rid,"result":result}
+    return _rpc_error(rid,-32601,f"Method not found: {method}")

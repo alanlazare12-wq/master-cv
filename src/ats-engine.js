@@ -1,5 +1,5 @@
 import {matchResumeToJob,canonicalSkills} from './job-engine.js?v=48';
-import {sectionById} from './section-catalog.js?v=48';
+import {sectionById,sectionVisible} from './section-catalog.js?v=48';
 
 const ACTION=/^(lider|cre|diseñ|desarroll|implement|aument|redu|optimiz|gestion|coordin|analiz|automat|constru|dirig|mejor|negoci|launch|built|led|improv|develop|implement|design|reduce|increase|automat|manage|coordinate|deliver|drive|created|grew|saved|achieved|owned|shipped|scaled|resolved|improved)/i;
 const METRIC=/\b\d+(?:[.,]\d+)?\s*(?:%|x|k|m|mil|mill[oó]n(?:es)?|usuarios?|clientes?|equipos?|d[ií]as?|horas?|€|\$|usd|eur|mxn|s|ms)?\b/i;
@@ -14,21 +14,22 @@ const clamp=n=>Math.max(0,Math.min(100,Math.round(n)));
 const clean=s=>String(s||'').trim();
 
 export function resumePlainText(r){
-  const parts=[r.basics?.fullName,r.basics?.headline,r.basics?.email,r.basics?.phone,r.basics?.location,r.basics?.linkedin,r.basics?.website,r.summary];
-  (r.experience||[]).forEach(e=>parts.push(e.title,e.company,e.location,e.startDate,e.endDate,...(e.bullets||[]).map(b=>b.text)));
-  (r.education||[]).forEach(e=>parts.push(e.degree,e.institution,e.startDate,e.endDate,e.details));
-  (r.skillGroups||[]).forEach(g=>parts.push(g.name,...(g.skills||[])));
-  (r.projects||[]).forEach(p=>parts.push(p.name,p.role,p.description,...(p.bullets||[]).map(b=>b.text)));
-  (r.certifications||[]).forEach(c=>parts.push(c.name,c.issuer,c.date));
-  (r.languages||[]).forEach(l=>parts.push(l.language,l.level));
-  (r.achievements||[]).forEach(a=>parts.push(a.title,a.description));
-  for(const items of Object.values(r.genericSections||{})) (items||[]).forEach(it=>parts.push(it.title,it.subtitle,it.location,it.startDate,it.endDate,it.description,...(it.bullets||[]).map(b=>b.text||b)));
-  (r.customSections||[]).forEach(s=>(s.items||[]).forEach(it=>parts.push(s.title,it.title,it.subtitle,it.description,...(it.bullets||[]).map(b=>b.text||b))));
+  const parts=[r.basics?.fullName,r.basics?.headline,r.basics?.email,r.basics?.phone,r.basics?.location,r.basics?.linkedin,r.basics?.website];
+  if(sectionVisible(r,'summary'))parts.push(r.summary);
+  if(sectionVisible(r,'experience'))(r.experience||[]).forEach(e=>parts.push(e.title,e.company,e.location,e.startDate,e.endDate,...(e.bullets||[]).map(b=>b.text)));
+  if(sectionVisible(r,'education'))(r.education||[]).forEach(e=>parts.push(e.degree,e.institution,e.startDate,e.endDate,e.details));
+  if(sectionVisible(r,'skills'))(r.skillGroups||[]).forEach(g=>parts.push(g.name,...(g.skills||[])));
+  if(sectionVisible(r,'projects'))(r.projects||[]).forEach(p=>parts.push(p.name,p.role,p.url,p.startDate,p.endDate,p.description,...(p.bullets||[]).map(b=>b.text)));
+  if(sectionVisible(r,'certifications'))(r.certifications||[]).forEach(c=>parts.push(c.name,c.issuer,c.date,c.url));
+  if(sectionVisible(r,'languages'))(r.languages||[]).forEach(l=>parts.push(l.language,l.level));
+  if(sectionVisible(r,'achievements'))(r.achievements||[]).forEach(a=>parts.push(a.title,a.date,a.description));
+  for(const [id,items] of Object.entries(r.genericSections||{}))if(sectionVisible(r,id))(items||[]).forEach(it=>parts.push(it.title,it.subtitle,it.location,it.startDate,it.endDate,it.url,it.description,...(it.bullets||[]).map(b=>b.text||b)));
+  (r.customSections||[]).forEach(s=>{const id='custom:'+s.id;if(sectionVisible(r,id))(s.items||[]).forEach(it=>parts.push(s.title,it.title,it.subtitle,it.location,it.startDate,it.endDate,it.url,it.description,...(it.bullets||[]).map(b=>b.text||b)))});
   return parts.filter(Boolean).join(' ');
 }
 
-function bulletsOf(r){return (r.experience||[]).flatMap(e=>(e.bullets||[]).map(b=>({...b,where:e.title||e.company||'Experiencia'}))).filter(b=>clean(b.text))}
-function allLinks(r){return [r.basics?.linkedin,r.basics?.website].filter(Boolean)}
+function bulletsOf(r){return sectionVisible(r,'experience')?(r.experience||[]).flatMap(e=>(e.bullets||[]).map(b=>({...b,where:e.title||e.company||'Experiencia'}))).filter(b=>clean(b.text)):[]}
+function allLinks(r){const generic=Object.entries(r.genericSections||{}).flatMap(([id,items])=>sectionVisible(r,id)?(items||[]).map(it=>it?.url):[]),custom=(r.customSections||[]).flatMap(s=>sectionVisible(r,'custom:'+s.id)?(s.items||[]).map(it=>it?.url):[]);return [r.basics?.linkedin,r.basics?.website,...(sectionVisible(r,'projects')?(r.projects||[]).map(p=>p?.url):[]),...(sectionVisible(r,'certifications')?(r.certifications||[]).map(c=>c?.url):[]),...generic,...custom].filter(Boolean)}
 function overlapDates(exps){
   const ranges=exps.map(e=>({s:year(e.startDate),f:e.current?new Date().getFullYear():year(e.endDate)})).filter(x=>x.s&&x.f).sort((a,b)=>a.s-b.s);let overlaps=0;
   for(let i=1;i<ranges.length;i++) if(ranges[i].s<ranges[i-1].f-1) overlaps++;return overlaps;
@@ -39,8 +40,9 @@ function sectionHasContent(r,id){
 }
 
 export function analyzeResume(r,job=null){
-  const text=resumePlainText(r),wordCount=words(text).length,summaryWords=words(r.summary).length,bullets=bulletsOf(r),quantified=bullets.filter(b=>METRIC.test(b.text)),action=bullets.filter(b=>ACTION.test(b.text.trim())),skillList=[...new Set((r.skillGroups||[]).flatMap(g=>g.skills||[]).filter(Boolean))],skillCount=skillList.length;
-  const contextualSkills=[...new Set((r.experience||[]).flatMap(e=>(e.bullets||[]).flatMap(b=>canonicalSkills(b.text))).concat((r.projects||[]).flatMap(p=>canonicalSkills([p.description,...(p.bullets||[]).map(b=>b.text)].join(' ')))))];
+  const summary=sectionVisible(r,'summary')?r.summary:'',visibleExperience=sectionVisible(r,'experience')?(r.experience||[]):[],visibleProjects=sectionVisible(r,'projects')?(r.projects||[]):[],visibleSkills=sectionVisible(r,'skills')?(r.skillGroups||[]):[];
+  const text=resumePlainText(r),wordCount=words(text).length,summaryWords=words(summary).length,bullets=bulletsOf(r),quantified=bullets.filter(b=>METRIC.test(b.text)),action=bullets.filter(b=>ACTION.test(b.text.trim())),skillList=[...new Set(visibleSkills.flatMap(g=>g.skills||[]).filter(Boolean))],skillCount=skillList.length;
+  const contextualSkills=[...new Set(visibleExperience.flatMap(e=>(e.bullets||[]).flatMap(b=>canonicalSkills(b.text))).concat(visibleProjects.flatMap(p=>canonicalSkills([p.description,...(p.bullets||[]).map(b=>b.text)].join(' ')))))];
   const contactOk=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.basics?.email||'')&&String(r.basics?.phone||'').replace(/\D/g,'').length>=8;
   const template=r.settings?.templateId||'ats-ink';
   const family=(r.settings?.templateFamily||String(template).split('-')[0]||'ats');
@@ -61,7 +63,7 @@ export function analyzeResume(r,job=null){
 function buildChecks(c){
   const {r,text,wordCount,summaryWords,bullets,quantified,action,skillCount,contextualSkills,contactOk,risk,avgBullet,match}=c;
   const out=[];const add=(id,category,title,pass,message,{priority=5,weight=4,partial=false,example='',actionTarget=''}={})=>out.push({id,category,title,pass,partial:!pass&&partial,message,priority,weight,example,actionTarget});
-  const exp=r.experience||[],edu=r.education||[],links=allLinks(r),emptyVisible=(r.settings?.sectionOrder||[]).filter(id=>!(r.settings?.hiddenSections||[]).includes(id)&&!sectionHasContent(r,id));
+  const exp=sectionVisible(r,'experience')?(r.experience||[]):[],edu=sectionVisible(r,'education')?(r.education||[]):[],summary=sectionVisible(r,'summary')?(r.summary||''):'',links=allLinks(r),emptyVisible=(r.settings?.sectionOrder||[]).filter(id=>sectionVisible(r,id)&&!sectionHasContent(r,id));
 
   // 1-7 Parsabilidad
   add('contact','parsability','Datos de contacto',contactOk,contactOk?'Correo y teléfono son legibles.':'Añade un correo válido y un teléfono con al menos 8 dígitos.',{priority:10,weight:7,actionTarget:'basics'});
@@ -92,7 +94,7 @@ function buildChecks(c){
   // 21-24 Legibilidad
   add('word-count','readability','Extensión total',wordCount>=150&&wordCount<=950,`El CV contiene ${wordCount} palabras. Ajusta la extensión al seniority y relevancia.`,{weight:5,partial:wordCount>=100&&wordCount<=1100});
   add('bullet-length','readability','Bullets escaneables',!avgBullet||(avgBullet>=8&&avgBullet<=30),`Promedio de ${Math.round(avgBullet)} palabras por bullet; procura que cada punto sea rápido de escanear.`,{weight:4,partial:avgBullet>=6&&avgBullet<=36,actionTarget:'experience'});
-  add('first-person','readability','Redacción directa',!FIRST_PERSON.test(r.summary||''),FIRST_PERSON.test(r.summary||'')?'Evita primera persona repetitiva en el perfil; usa lenguaje profesional directo.':'El perfil usa redacción concisa.',{weight:3,actionTarget:'summary'});
+  add('first-person','readability','Redacción directa',!FIRST_PERSON.test(summary),FIRST_PERSON.test(summary)?'Evita primera persona repetitiva en el perfil; usa lenguaje profesional directo.':'El perfil usa redacción concisa.',{weight:3,actionTarget:'summary'});
   add('repetition','readability','Baja repetición',repeatRatio(text)<.09,'Varía verbos y expresiones para evitar sensación de texto repetitivo.',{weight:4,partial:repeatRatio(text)<.14});
 
   // 25-27 Consistencia / target
@@ -117,13 +119,13 @@ export function atsTextView(r){
     else if(id==='experience'&&(r.experience||[]).length){title('experience','Experiencia profesional')&&head(title('experience','Experiencia profesional'));for(const e of r.experience){push(`${e.title||''}${e.company?` — ${e.company}`:''}`,[e.startDate,e.current?'Actualidad':e.endDate].filter(Boolean).join(' – '),e.location);(e.bullets||[]).filter(b=>clean(b.text)).forEach(b=>push(`- ${b.text}`))}}
     else if(id==='education'&&(r.education||[]).length){title('education','Educación')&&head(title('education','Educación'));for(const e of r.education)push(`${e.degree||''}${e.institution?` — ${e.institution}`:''}`,[e.startDate,e.endDate].filter(Boolean).join(' – '),e.details)}
     else if(id==='skills'&&(r.skillGroups||[]).length){title('skills','Habilidades')&&head(title('skills','Habilidades'));for(const g of r.skillGroups)if((g.skills||[]).length)push(`${g.name}: ${(g.skills||[]).join(', ')}`)}
-    else if(id==='projects'&&(r.projects||[]).length){title('projects','Proyectos')&&head(title('projects','Proyectos'));for(const p of r.projects){push(`${p.name||''}${p.role?` — ${p.role}`:''}`,p.description);(p.bullets||[]).forEach(b=>push(`- ${b.text}`))}}
-    else if(id==='certifications'&&(r.certifications||[]).length){title('certifications','Certificaciones')&&head(title('certifications','Certificaciones'));for(const c of r.certifications)push([c.name,c.issuer,c.date].filter(Boolean).join(' — '))}
+    else if(id==='projects'&&(r.projects||[]).length){title('projects','Proyectos')&&head(title('projects','Proyectos'));for(const p of r.projects){push(`${p.name||''}${p.role?` — ${p.role}`:''}`,[p.startDate,p.endDate].filter(Boolean).join(' – '),p.url,p.description);(p.bullets||[]).filter(b=>clean(b?.text)).forEach(b=>push(`- ${b.text}`))}}
+    else if(id==='certifications'&&(r.certifications||[]).length){title('certifications','Certificaciones')&&head(title('certifications','Certificaciones'));for(const c of r.certifications)push([c.name,c.issuer,c.date].filter(Boolean).join(' — '),c.url)}
     else if(id==='languages'&&(r.languages||[]).length){title('languages','Idiomas')&&head(title('languages','Idiomas'));for(const l of r.languages)push([l.language,l.level].filter(Boolean).join(' — '))}
-    else if(id==='achievements'&&(r.achievements||[]).length){title('achievements','Logros')&&head(title('achievements','Logros'));for(const a of r.achievements)push([a.title,a.description].filter(Boolean).join(' — '))}
+    else if(id==='achievements'&&(r.achievements||[]).length){title('achievements','Logros')&&head(title('achievements','Logros'));for(const a of r.achievements)push([a.title,a.date,a.description].filter(Boolean).join(' — '))}
     else if(id.startsWith('custom:')){const cs=(r.customSections||[]).find(s=>`custom:${s.id}`===id);if(cs){title(id,cs.title)&&head(title(id,cs.title));for(const it of cs.items||[])genericLines(it,push)}}
     else {const items=r.genericSections?.[id]||[];if(items.length){title(id,sectionById(id)?.label||id)&&head(title(id,sectionById(id)?.label||id));for(const it of items)genericLines(it,push)}}
   }
   return lines.join('\n').replace(/\n{3,}/g,'\n\n').trim();
 }
-function genericLines(it,push){push([it.title,it.subtitle].filter(Boolean).join(' — '),[it.startDate,it.endDate].filter(Boolean).join(' – '),it.location,it.description);(it.bullets||[]).forEach(b=>push(`- ${typeof b==='string'?b:b.text||''}`))}
+function genericLines(it,push){push([it.title,it.subtitle].filter(Boolean).join(' — '),[it.startDate,it.endDate].filter(Boolean).join(' – '),it.location,it.url,it.description);(it.bullets||[]).forEach(b=>push(`- ${typeof b==='string'?b:b.text||''}`))}

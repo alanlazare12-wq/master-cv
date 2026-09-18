@@ -27,6 +27,13 @@ test('app.js arranca con un DOM mínimo y renderiza el CV inicial',async()=>{
   assert.match(get('#templateLabel').textContent,/ATS|Presentación/);
 });
 
+test('v48 editor conserva campos estructurados de proyectos, certificaciones y logros',async()=>{
+  const r=defaultResume();r.settings.sectionOrder.push('achievements','publications');r.projects=[{id:'proj_fields',name:'Portal QA',role:'Full Stack',url:'https://example.com/portal',startDate:'2024',endDate:'2025',description:'Proyecto interno',bullets:[]}];r.certifications=[{id:'cert_fields',name:'Cert QA',issuer:'Entidad',date:'2025',url:'https://example.com/cert'}];r.achievements=[{id:'ach_fields',title:'Premio QA',date:'2026',description:'Reconocimiento técnico'}];r.genericSections.publications=[{id:'pub_fields',type:'publications',title:'Artículo QA',subtitle:'',location:'',startDate:'2025',endDate:'',url:'https://example.com/article',description:'Publicación técnica',bullets:[]}];
+  const store={'hoja-personal-v48':JSON.stringify({documents:[{id:r.id,name:r.title,resume:r,updatedAt:r.updatedAt}],currentId:r.id,jobText:''})};
+  const {get}=installDom(store);await import(`../src/app.js?smoke=structured-fields-${Date.now()}`);get('#mainNav').onclick({target:{closest:()=>({dataset:{view:'editor'}})}});
+  const html=get('#editor').innerHTML;assert.match(html,/Portal QA/);assert.match(html,/https:\/\/example\.com\/portal/);assert.match(html,/data-item="project"[^>]*data-key="startDate"/);assert.match(html,/Cert QA/);assert.match(html,/data-item="cert"[^>]*data-key="url"/);assert.match(html,/Premio QA/);assert.match(html,/data-ed="add-achievement"/);assert.match(html,/Artículo QA/);assert.match(html,/https:\/\/example\.com\/article/);assert.match(html,/data-generic-section="publications"[^>]*data-key="url"/);
+});
+
 test('preview Exportación conserva el perfil PDF y permite edición exacta',async()=>{
   let human,ats,editorSurface,exportSurface;
   const {get}=installDom({}, {queryAll:(sel,make)=>{

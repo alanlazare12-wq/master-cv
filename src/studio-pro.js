@@ -1,9 +1,10 @@
 import {analyzeResume} from './ats-engine.js?v=48';
-import {matchResumeToJob} from './job-engine.js?v=48';
 import {templateById,applyTemplateToResume} from './personal-templates.js?v=48';
 import {snapshotResume,MAX_AUTO_VERSIONS} from './storage.js?v=48';
+import {DESIGN_VARIANT_SETTING_KEYS} from './schema.js?v=48';
+import {sectionVisible} from './section-catalog.js?v=48';
 
-const DESIGN_KEYS=['templateId','templateFamily','templateRisk','layout','font','accent','paper','density','fontScale','lineHeight','margin','showIcons','showPhoto','photoShape','photoPosition','photoSize'];
+const DESIGN_KEYS=DESIGN_VARIANT_SETTING_KEYS;
 const copy=o=>structuredClone(o);
 export const DESIGN_VARIANTS=['ats','presentation'];
 
@@ -55,12 +56,13 @@ export function compositionReport(resume){
   sections.push({id:'experience',label:'Experiencia',words:(resume.experience||[]).reduce((n,e)=>n+words(`${e.title} ${e.company} ${e.location}`)+bulletWords(e.bullets),0)});
   sections.push({id:'education',label:'Educación',words:(resume.education||[]).reduce((n,e)=>n+words(`${e.degree} ${e.institution} ${e.details}`),0)});
   sections.push({id:'skills',label:'Habilidades',words:(resume.skillGroups||[]).reduce((n,g)=>n+words(g.name)+(g.skills||[]).reduce((m,x)=>m+words(x),0),0)});
-  sections.push({id:'projects',label:'Proyectos',words:(resume.projects||[]).reduce((n,p)=>n+words(`${p.name} ${p.role} ${p.description}`)+bulletWords(p.bullets),0)});
-  sections.push({id:'certifications',label:'Certificaciones',words:(resume.certifications||[]).reduce((n,c)=>n+words(`${c.name} ${c.issuer}`),0)});
+  sections.push({id:'projects',label:'Proyectos',words:(resume.projects||[]).reduce((n,p)=>n+words(`${p.name} ${p.role} ${p.startDate} ${p.endDate} ${p.url} ${p.description}`)+bulletWords(p.bullets),0)});
+  sections.push({id:'certifications',label:'Certificaciones',words:(resume.certifications||[]).reduce((n,c)=>n+words(`${c.name} ${c.issuer} ${c.date} ${c.url}`),0)});
   sections.push({id:'languages',label:'Idiomas',words:(resume.languages||[]).reduce((n,l)=>n+words(`${l.language} ${l.level}`),0)});
-  for(const [id,items] of Object.entries(resume.genericSections||{}))sections.push({id,label:id,words:(items||[]).reduce((n,it)=>n+words(`${it.title} ${it.subtitle} ${it.description}`)+bulletWords(it.bullets),0)});
-  for(const s of resume.customSections||[])sections.push({id:`custom:${s.id}`,label:s.title||'Personalizada',words:(s.items||[]).reduce((n,it)=>n+words(`${it.title} ${it.subtitle} ${it.description}`)+bulletWords(it.bullets),0)});
-  const visible=sections.filter(s=>!(resume.settings.hiddenSections||[]).includes(s.id)&&s.words>0);const total=visible.reduce((n,s)=>n+s.words,0)||1;
+  sections.push({id:'achievements',label:'Logros',words:(resume.achievements||[]).reduce((n,a)=>n+words(`${a.title} ${a.date} ${a.description}`),0)});
+  for(const [id,items] of Object.entries(resume.genericSections||{}))sections.push({id,label:id,words:(items||[]).reduce((n,it)=>n+words(`${it.title} ${it.subtitle} ${it.location} ${it.startDate} ${it.endDate} ${it.url} ${it.description}`)+bulletWords(it.bullets),0)});
+  for(const s of resume.customSections||[])sections.push({id:`custom:${s.id}`,label:s.title||'Personalizada',words:(s.items||[]).reduce((n,it)=>n+words(`${it.title} ${it.subtitle} ${it.location} ${it.startDate} ${it.endDate} ${it.url} ${it.description}`)+bulletWords(it.bullets),0)});
+  const visible=sections.filter(s=>sectionVisible(resume,s.id)&&s.words>0);const total=visible.reduce((n,s)=>n+s.words,0)||1;
   visible.forEach(s=>{s.share=Math.round(s.words/total*100);s.pressure=s.share>=42?'high':s.share>=28?'medium':'normal'});
   visible.sort((a,b)=>b.words-a.words);
   const tips=[];const exp=visible.find(x=>x.id==='experience');const sum=visible.find(x=>x.id==='summary');
@@ -73,7 +75,7 @@ export function compositionReport(resume){
 
 export function compareVersion(current,versionResume){
   if(!versionResume)return null;const cur=analyzeResume(current,current.target),old=analyzeResume(versionResume,versionResume.target);
-  const curMatch=current.target?matchResumeToJob(current,current.target).score:null,oldMatch=versionResume.target?matchResumeToJob(versionResume,versionResume.target).score:null;
+  const curMatch=current.target?cur.match?.score??null:null,oldMatch=versionResume.target?old.match?.score??null:null;
   return{ats:{before:old.score,after:cur.score,delta:cur.score-old.score},jobMatch:{before:oldMatch,after:curMatch,delta:curMatch!=null&&oldMatch!=null?curMatch-oldMatch:null},summaryChanged:String(current.summary||'')!==String(versionResume.summary||''),experienceDelta:(current.experience||[]).length-(versionResume.experience||[]).length,skillsDelta:(current.skillGroups||[]).flatMap(x=>x.skills||[]).length-(versionResume.skillGroups||[]).flatMap(x=>x.skills||[]).length};
 }
 

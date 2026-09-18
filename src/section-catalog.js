@@ -28,3 +28,8 @@ export const SECTION_CATALOG = [
 export const CORE_ORDER = ['summary','experience','education','skills','projects','certifications','languages'];
 export const OPTIONAL_ORDER = SECTION_CATALOG.map(x=>x.id).filter(id=>!CORE_ORDER.includes(id) && id!=='custom');
 export const sectionById = id => SECTION_CATALOG.find(x=>x.id===id);
+export const sectionVisible = (resume,id) => {
+  const order=resume?.settings?.sectionOrder;
+  if(Array.isArray(order)&&order.length&&!order.includes(id))return false;
+  return !(resume?.settings?.hiddenSections||[]).includes(id);
+};

@@ -42,7 +42,7 @@ function nums(value){
   return out;
 }
 const set=x=>new Set(x);
-const textOfResume=r=>{const basics={...(r.basics||{})};delete basics.photo;return JSON.stringify({basics,summary:r.summary,experience:r.experience,education:r.education,skillGroups:r.skillGroups,projects:r.projects,certifications:r.certifications,languages:r.languages,achievements:r.achievements})};
+const textOfResume=r=>{const basics={...(r.basics||{})};delete basics.photo;return JSON.stringify({basics,summary:r.summary,experience:r.experience,education:r.education,skillGroups:r.skillGroups,projects:r.projects,certifications:r.certifications,languages:r.languages,achievements:r.achievements,genericSections:r.genericSections,customSections:r.customSections})};
 function factualEvidenceText(r){
   const lines=[];
   const add=v=>{if(typeof v==='string'&&v.trim())lines.push(v.trim())};
@@ -54,6 +54,8 @@ function factualEvidenceText(r){
   for(const c of r?.certifications||[]){add(c.name);add(c.issuer);add(c.date)}
   for(const l of r?.languages||[]){add(l.language);add(l.level)}
   for(const a of r?.achievements||[]){add(a.title);add(a.description);add(a.date)}
+  for(const [section,items] of Object.entries(r?.genericSections||{})){add(section);for(const it of items||[]){add(it.title);add(it.subtitle);add(it.location);add(it.startDate);add(it.endDate);add(it.url);add(it.description);for(const b of it.bullets||[])add(typeof b==='string'?b:b?.text)}}
+  for(const section of r?.customSections||[]){add(section.title);for(const it of section.items||[]){add(it.title);add(it.subtitle);add(it.location);add(it.startDate);add(it.endDate);add(it.url);add(it.description);for(const b of it.bullets||[])add(typeof b==='string'?b:b?.text)}}
   return lines.join('\n');
 }
 const STOP=new Set('a al algo ante bajo con contra cual cuando de del desde donde durante e el ella ellas ellos en entre era es esa ese eso esta este esto fue ha hacia hasta la las lo los mas más mi muy ni no o para pero por porque que se si sin sobre su sus te tu un una unas uno unos y ya the a an and or but for from in into of on to with as at by is are was were be been being this that these those during'.split(/\s+/));

@@ -88,7 +88,9 @@ export function applyBridgeEditProposal(resume,item){
   const normalized=normalizeResume(structuredClone(resume));for(const key of Object.keys(resume))delete resume[key];Object.assign(resume,normalized);return true;
 }
 
-export function tunnelCommands(tunnelId){
-  const id=String(tunnelId||'').trim().replace(/[^A-Za-z0-9_.:-]/g,'').slice(0,160),endpoint='http://127.0.0.1:4173/mcp';
-  return{endpoint,init:id?`tunnel-client init --sample sample_mcp_remote_no_auth --profile hoja-personal --tunnel-id ${id} --mcp-server-url ${endpoint}`:'',doctor:'tunnel-client doctor --profile hoja-personal --explain',run:'tunnel-client run --profile hoja-personal'};
+export function praxisNodeConnectionGuide(status={}){
+  const masterCvMcpEndpoint=String(status.mcpEndpoint||'http://127.0.0.1:4173/mcp');
+  const praxisNodeDefaultMcpEndpoint=String(status.praxisNodeDefaultMcpEndpoint||'http://127.0.0.1:47321/mcp');
+  const defaultTunnelProfile=String(status.praxisNodeTunnelProfile||'praxisnode');
+  return{masterCvMcpEndpoint,praxisNodeDefaultMcpEndpoint,defaultTunnelProfile,defaultDetected:status.praxisNodeDefaultDetected===true,detectionScope:String(status.praxisNodeDetectionScope||'default-instance-local-mcp-only'),secondaryInstanceNote:'Las instancias secundarias de PraxisNode usan su propio endpoint MCP y perfil de túnel.'};
 }

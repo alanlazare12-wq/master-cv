@@ -77,7 +77,7 @@ export const templateById=id=>PERSONAL_TEMPLATES.find(t=>t.id===id)||PERSONAL_TE
 export const atsRecommended=()=>PERSONAL_TEMPLATES.filter(t=>t.risk==='low'&&t.layout==='single');
 
 export function applyTemplateToResume(resume,id,{preserveOverrides=false}={}){
-  const t=templateById(id),old={...resume.settings};delete resume.settings.forgeRecipeId;delete resume.settings.forgeRecipeName;resume.settings.templateId=t.id;resume.settings.templateFamily=t.family;resume.settings.templateRisk=t.risk;
+  const t=templateById(id),old={...resume.settings};delete resume.settings.forgeRecipeId;delete resume.settings.forgeRecipeName;delete resume.settings.forgeRecipeVersion;resume.settings.templateId=t.id;resume.settings.templateFamily=t.family;resume.settings.templateRisk=t.risk;
   if(!preserveOverrides)Object.assign(resume.settings,{layout:t.layout,font:t.font,accent:t.accent,density:t.density,margin:t.margin,fontScale:t.fontScale,lineHeight:t.lineHeight,showPhoto:!!t.photoFriendly,photoPosition:t.photoPosition||resume.settings.photoPosition||'left',photoShape:t.photoShape||resume.settings.photoShape||'circle',photoSize:t.photoSize||resume.settings.photoSize||'medium'});
   else Object.assign(resume.settings,{layout:old.layout||t.layout,font:old.font||t.font,accent:old.accent||t.accent});
   return resume;

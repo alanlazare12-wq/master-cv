@@ -22,7 +22,7 @@ SECTION_ALIASES = {
 }
 
 EMAIL_RE = re.compile(r'\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', re.I)
-PHONE_RE = re.compile(r'(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)')
+PHONE_RE = re.compile(r'(?<!\d)(?:\+?\d[\d \t().-]{7,}\d)(?!\d)')
 URL_RE = re.compile(r'(?:(?:https?://)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:/[^\s]*)?)', re.I)
 DATE_RANGE_RE = re.compile(
     r'(?P<start>(?:0?[1-9]|1[0-2])[/.-](?:19|20)\d{2}|(?:19|20)\d{2})\s*'
@@ -31,6 +31,39 @@ DATE_RANGE_RE = re.compile(
     re.I,
 )
 BULLET_RE = re.compile(r'^\s*(?:[•●▪◦·\-*]|\d+[.)])\s+')
+
+
+def _urls(text: str) -> list[str]:
+    email_spans = [(m.start(), m.end()) for m in EMAIL_RE.finditer(text)]
+    out = []
+    for match in URL_RE.finditer(text):
+        if any(match.start() >= start and match.end() <= end for start, end in email_spans):
+            continue
+        out.append(match.group(0))
+    return out
+
+
+def _split_first_url(text: str) -> tuple[str, str]:
+    urls = _urls(text)
+    if not urls:
+        return text.strip(), ''
+    url = urls[0]
+    start = text.find(url)
+    cleaned = (text[:start] + ' ' + text[start + len(url):]).strip(' \t-|–—·')
+    return cleaned.strip(), url
+
+
+def _phones(text: str) -> list[str]:
+    out = []
+    for match in PHONE_RE.finditer(text):
+        raw = match.group(0).strip()
+        digits = re.sub(r'\D', '', raw)
+        if not 8 <= len(digits) <= 15:
+            continue
+        if re.fullmatch(r'(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}', raw):
+            continue
+        out.append(raw)
+    return out
 
 MAX_DOCX_ENTRIES = 2000
 MAX_DOCX_TOTAL_UNCOMPRESSED = 24 * 1024 * 1024
@@ -167,10 +200,10 @@ def _split_sections(lines: list[str]) -> tuple[dict[str, list[str]], list[str]]:
 
 def _contact_details(header: list[str], all_text: str) -> tuple[dict, list[str]]:
     emails = EMAIL_RE.findall(all_text)
-    phones = PHONE_RE.findall(all_text)
-    urls = URL_RE.findall(all_text)
+    phones = _phones(all_text)
+    urls = _urls(all_text)
     linkedin = next((u for u in urls if 'linkedin.com' in u.lower()), '')
-    website = next((u for u in urls if 'linkedin.com' not in u.lower() and '@' not in u), '')
+    website = next((u for u in urls if 'linkedin.com' not in u.lower()), '')
 
     filtered = []
     for line in header:
@@ -208,6 +241,16 @@ def _date_parts(line: str) -> tuple[str, str, bool] | None:
     return start, '' if current else end, current
 
 
+def _record_header(lines: list[str], date_index: int, max_lines: int = 2) -> tuple[int, list[str]]:
+    header = []
+    j = date_index - 1
+    while j >= 0 and len(header) < max_lines and not BULLET_RE.match(lines[j]) and not _date_parts(lines[j]):
+        if lines[j].strip():
+            header.insert(0, lines[j].strip())
+        j -= 1
+    return date_index - len(header), header
+
+
 def _parse_experience(lines: list[str]) -> list[dict]:
     if not lines:
         return []
@@ -225,18 +268,11 @@ def _parse_experience(lines: list[str]) -> list[dict]:
             })
         return records
 
-    used_until = -1
+    headers = [_record_header(lines, idx) for idx in starts]
     for n, idx in enumerate(starts):
-        if idx <= used_until:
-            continue
-        next_idx = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        _, header_candidates = headers[n]
+        next_idx = headers[n + 1][0] if n + 1 < len(headers) else len(lines)
         date = _date_parts(lines[idx])
-        header_candidates = []
-        j = idx - 1
-        while j >= 0 and len(header_candidates) < 2 and not BULLET_RE.match(lines[j]) and not _date_parts(lines[j]):
-            if lines[j].strip():
-                header_candidates.insert(0, lines[j].strip())
-            j -= 1
         title = header_candidates[-1] if header_candidates else ''
         company = header_candidates[-2] if len(header_candidates) > 1 else ''
         if ' | ' in title or ' — ' in title or ' - ' in title:
@@ -260,7 +296,6 @@ def _parse_experience(lines: list[str]) -> list[dict]:
             'startDate': date[0], 'endDate': date[1], 'current': date[2],
             'bullets': [{'id': uid('b'), 'text': b[:800]} for b in bullets if b],
         })
-        used_until = idx
     # De-duplicate records that accidentally share identical headers and dates.
     unique = []
     seen = set()
@@ -269,6 +304,73 @@ def _parse_experience(lines: list[str]) -> list[dict]:
         if key not in seen:
             seen.add(key); unique.append(r)
     return unique[:12]
+
+
+def _parse_projects(lines: list[str]) -> list[dict]:
+    if not lines:
+        return []
+    starts = [i for i, line in enumerate(lines) if _date_parts(line)]
+    if not starts:
+        url = ''
+        plain_lines = []
+        for line in lines:
+            cleaned, found = _split_first_url(line)
+            if found and not url:
+                url = found
+            if cleaned:
+                plain_lines.append(cleaned)
+        nonbullets = [x for x in plain_lines if not BULLET_RE.match(x)]
+        bullets = [BULLET_RE.sub('', x).strip() for x in plain_lines if BULLET_RE.match(x)]
+        if not nonbullets and not bullets:
+            return []
+        name = nonbullets[0] if nonbullets else 'Proyecto'
+        role = nonbullets[1] if len(nonbullets) > 1 else ''
+        description = ' '.join(nonbullets[2:]) if len(nonbullets) > 2 else ''
+        return [{
+            'id': uid('proj'), 'name': name[:180], 'role': role[:160], 'url': url[:300],
+            'startDate': '', 'endDate': '', 'description': description[:1000],
+            'bullets': [{'id': uid('b'), 'text': b[:800]} for b in bullets if b],
+        }]
+
+    headers = [_record_header(lines, idx) for idx in starts]
+    out = []
+    for n, idx in enumerate(starts):
+        _, header_candidates = headers[n]
+        next_idx = headers[n + 1][0] if n + 1 < len(headers) else len(lines)
+        date = _date_parts(lines[idx])
+        name = header_candidates[0] if header_candidates else 'Proyecto'
+        role = header_candidates[1] if len(header_candidates) > 1 else ''
+        body = lines[idx + 1:next_idx]
+        url = ''
+        description_parts = []
+        bullets = []
+        for line in body:
+            cleaned, found = _split_first_url(line)
+            if found and not url:
+                url = found
+            line = cleaned
+            if not line:
+                continue
+            if BULLET_RE.match(line):
+                bullets.append(BULLET_RE.sub('', line).strip())
+            elif line and bullets:
+                bullets[-1] += ' ' + line
+            elif line:
+                description_parts.append(line)
+        out.append({
+            'id': uid('proj'), 'name': name[:180], 'role': role[:160], 'url': url[:300],
+            'startDate': date[0] if date else '', 'endDate': date[1] if date else '',
+            'description': ' '.join(description_parts)[:1000],
+            'bullets': [{'id': uid('b'), 'text': b[:800]} for b in bullets if b],
+        })
+    unique = []
+    seen = set()
+    for item in out:
+        key = (item['name'].lower(), item['role'].lower(), item['startDate'], item['endDate'])
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique[:20]
 
 
 def _parse_education(lines: list[str]) -> list[dict]:
@@ -324,10 +426,23 @@ def _parse_simple_items(lines: list[str], kind: str) -> list[dict]:
             parts = re.split(r'\s[-–—|:]\s|:\s*', text, maxsplit=1)
             out.append({'id': uid('lang'), 'language': parts[0][:80], 'level': parts[1][:80] if len(parts) > 1 else ''})
         elif kind == 'certifications':
-            parts = re.split(r'\s[-–—|]\s', text, maxsplit=2)
-            out.append({'id': uid('cert'), 'name': parts[0][:180], 'issuer': parts[1][:120] if len(parts) > 1 else '', 'date': parts[2][:40] if len(parts) > 2 else ''})
+            cleaned, url = _split_first_url(text)
+            parts = re.split(r'\s[-–—|]\s', cleaned, maxsplit=2)
+            out.append({'id': uid('cert'), 'name': parts[0][:180], 'issuer': parts[1][:120] if len(parts) > 1 else '', 'date': parts[2][:40] if len(parts) > 2 else '', 'url': url[:300]})
         elif kind == 'achievements':
-            out.append({'id': uid('ach'), 'title': text[:180], 'description': ''})
+            parts = [p.strip() for p in re.split(r'\s[-–—|]\s', text) if p.strip()]
+            date_index = next((i for i, part in enumerate(parts) if re.fullmatch(r'(?:(?:0?[1-9]|1[0-2])[/.-])?(?:19|20)\d{2}', part)), None)
+            if date_index is not None:
+                date = parts.pop(date_index)
+            else:
+                date_match = re.search(r'\b(?:(?:0?[1-9]|1[0-2])[/.-])?(?:19|20)\d{2}\b', text)
+                date = date_match.group(0) if date_match else ''
+                if date_match:
+                    cleaned = (text[:date_match.start()] + ' ' + text[date_match.end():]).strip(' \t-|–—·')
+                    parts = [p.strip() for p in re.split(r'\s[-–—|]\s', cleaned) if p.strip()]
+            title = parts[0] if parts else re.sub(r'\b'+re.escape(date)+r'\b', '', text).strip(' \t-|–—·')
+            description = ' — '.join(parts[1:]) if len(parts) > 1 else ''
+            out.append({'id': uid('ach'), 'title': title[:180], 'date': date[:100], 'description': description[:1000]})
     return out
 
 
@@ -344,6 +459,7 @@ def parse_resume_text(text: str, filename: str = 'CV importado') -> dict:
     summary = ' '.join(summary_lines).strip()[:1800]
 
     experience = _parse_experience(sections.get('experience', []))
+    projects = _parse_projects(sections.get('projects', []))
     education = _parse_education(sections.get('education', []))
     skill_groups = _parse_skills(sections.get('skills', []))
     languages = _parse_simple_items(sections.get('languages', []), 'languages')
@@ -378,7 +494,7 @@ def parse_resume_text(text: str, filename: str = 'CV importado') -> dict:
         'experience': experience,
         'education': education,
         'skillGroups': skill_groups or [{'id': uid('skills'), 'name': 'Habilidades', 'skills': []}],
-        'projects': [], 'certifications': certifications, 'languages': languages, 'achievements': achievements,
+        'projects': projects, 'certifications': certifications, 'languages': languages, 'achievements': achievements,
         'genericSections': {}, 'customSections': [],
         'settings': {
             'templateId':'nexus','layout':'single','font':'Inter','accent':'#6d5dfc','paper':'a4','density':'comfortable','fontScale':1,'lineHeight':'normal',

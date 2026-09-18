@@ -69,7 +69,7 @@
 - `@page` dinámico A4/Letter.
 - Singular/plural correcto en páginas planificadas.
 - Preflight detecta contradicción de familia profesional entre titular y resumen.
-- Gate final: 747/747 JS; 110 PASS + 1 skip Python; Edge 11/11 vistas y consola limpia.
+- Gate histórico mcp12: 747/747 JS; 110 PASS + 1 skip Python; Edge 11/11 vistas y consola limpia. El gate vigente está documentado en `QA-REPORT.md`.
 
 ### Export Preview exacto mcp13
 - Nuevo `src/export-document.js`: especificación única del documento final.

@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "serve": "python server.py --no-browser",
+    "serve": "node tools/run-python.mjs server.py --no-browser",
     "test": "node --test tests/*.test.js",
-    "test:python": "python -m unittest discover -s tests_py -p test_*.py",
+    "test:python": "node tools/run-python.mjs -m unittest discover -s tests_py -p test_*.py",
     "test:all": "npm test && npm run test:python",
-    "check": "node --check sw.js && node --check src/version.js && node --check src/career-pack.js && node --check src/evidence.js && node --check src/page-tools.js && node --check src/durable-store.js && node --check src/tab-sync.js && node --check src/conflict-resolver.js && node --check src/app.js && node --check src/personal-templates.js && node --check src/template-engine-base.js && node --check src/studio-engine.js && node --check src/studio-pro.js && node --check src/local-pro.js && node --check src/local-premium.js && node --check src/template-forge.js && node --check src/local-ai.js && node --check src/chatgpt-bridge.js && node --check src/resume-intelligence.js && node --check src/export-document.js && node --check src/resume-workbench.js && node --check src/schema.js && node --check src/storage.js && node --check src/ats-engine.js && node --check src/job-engine.js && node --check src/exporters.js && python -m py_compile server.py server_lib/resume_parser.py server_lib/mcp_bridge.py"
+    "check": "node --check sw.js && node --check src/version.js && node --check src/career-pack.js && node --check src/evidence.js && node --check src/page-tools.js && node --check src/durable-store.js && node --check src/tab-sync.js && node --check src/conflict-resolver.js && node --check src/app.js && node --check src/personal-templates.js && node --check src/template-engine-base.js && node --check src/studio-engine.js && node --check src/studio-pro.js && node --check src/local-pro.js && node --check src/local-premium.js && node --check src/template-forge.js && node --check src/local-ai.js && node --check src/chatgpt-bridge.js && node --check src/resume-intelligence.js && node --check src/export-document.js && node --check src/resume-workbench.js && node --check src/schema.js && node --check src/storage.js && node --check src/ats-engine.js && node --check src/job-engine.js && node --check src/exporters.js && node tools/run-python.mjs -m py_compile server.py server_lib/resume_parser.py server_lib/mcp_bridge.py"
   }
 }

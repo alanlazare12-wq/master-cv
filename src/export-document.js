@@ -23,5 +23,5 @@ export function buildExportPdfPayload(resume,{fillScale=1}={}){
 }
 
 export function exportDocumentSignature(resume){
-  return JSON.stringify({v:EXPORT_ASSET_VERSION,id:resume?.id||'',updatedAt:resume?.updatedAt||0,title:resume?.title||'',basics:resume?.basics||{},summary:resume?.summary||'',experience:resume?.experience||[],education:resume?.education||[],skillGroups:resume?.skillGroups||[],projects:resume?.projects||[],certifications:resume?.certifications||[],languages:resume?.languages||[],achievements:resume?.achievements||[],settings:resume?.settings||{},target:resume?.target||null});
+  return JSON.stringify({v:EXPORT_ASSET_VERSION,id:resume?.id||'',updatedAt:resume?.updatedAt||0,title:resume?.title||'',basics:resume?.basics||{},summary:resume?.summary||'',experience:resume?.experience||[],education:resume?.education||[],skillGroups:resume?.skillGroups||[],projects:resume?.projects||[],certifications:resume?.certifications||[],languages:resume?.languages||[],achievements:resume?.achievements||[],genericSections:resume?.genericSections||{},customSections:resume?.customSections||[],settings:resume?.settings||{},target:resume?.target||null});
 }

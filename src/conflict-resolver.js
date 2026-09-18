@@ -23,7 +23,7 @@ export function resolveConflictState(latestState,localState,localCurrentId,{mode
   const latestDocs=Array.isArray(latestState?.documents)?latestState.documents:[],localDoc=sourceDoc(localState,localCurrentId);
   if(!latestDocs.length)throw new Error('La biblioteca durable más reciente no es válida.');
   if(!localDoc?.resume||typeof localDoc.resume!=='object')throw new Error('No hay un CV local válido para recuperar.');
-  const next={documents:clone(latestDocs),currentId:String(latestState?.currentId||''),jobText:String(latestState?.jobText||'')};
+  const next=clone(latestState||{});next.documents=clone(latestDocs);next.currentId=String(latestState?.currentId||'');next.jobText=String(latestState?.jobText||'');
   const resumeId=String(localDoc.resume.id||''),remoteIndex=next.documents.findIndex(d=>String(d?.resume?.id||'')===resumeId);
   const stamp=Math.max(1,Number(now)||Date.now());
 

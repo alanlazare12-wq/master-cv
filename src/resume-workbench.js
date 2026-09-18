@@ -1,7 +1,9 @@
 import {analyzeResume} from './ats-engine.js?v=48';
-import {matchResumeToJob} from './job-engine.js?v=48';
 import {templateAudit,buildPagePlan} from './local-pro.js?v=48';
 import {writingCoach,exportIntegrityAudit,factFingerprint,pageQuality} from './local-premium.js?v=48';
+import {PROFILE_SETTING_KEYS} from './schema.js?v=48';
+import {sectionVisible} from './section-catalog.js?v=48';
+import {exportChecklist} from './resume-intelligence.js?v=48-mcp20';
 
 const clone=o=>structuredClone(o);
 const uid=(p='wb')=>`${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
@@ -14,11 +16,7 @@ export const PROFILE_LIMIT=40;
 export const TEST_CASE_LIMIT=40;
 export const RELEASE_HISTORY_LIMIT=30;
 
-const SETTINGS_KEYS=[
-  'templateId','templateFamily','templateRisk','layout','font','accent','paper','density','fontScale','lineHeight','margin','showIcons',
-  'headerStyle','headingStyle','dividerStyle','contactStyle','sectionOrder','hiddenSections','sectionColumns','pageBreakHints','activeDesignVariant',
-  'designVariants','studioPackId','pageStrategy','resumeMode','forgeRecipeId','forgeRecipeName'
-];
+const SETTINGS_KEYS=PROFILE_SETTING_KEYS;
 
 export function ensureWorkbench(resume){
   const current=resume.workbench&&typeof resume.workbench==='object'?resume.workbench:{};
@@ -64,7 +62,7 @@ export function createTestCase(resume,{name='Caso de prueba',minAts,minJobMatch,
   const wb=ensureWorkbench(resume);if(!resume.target)throw new Error('Analiza una vacante antes de guardar un caso');
   const tc={
     id:uid('test'),name:String(name||'Caso de prueba').trim().slice(0,100)||'Caso de prueba',createdAt:Date.now(),target:clone(resume.target),
-    thresholds:{minAts:Number.isFinite(+minAts)?clamp(+minAts,0,100):wb.gatePolicy.minAts,minJobMatch:Number.isFinite(+minJobMatch)?clamp(+minJobMatch,0,100):wb.gatePolicy.minJobMatch,maxPages:Number.isFinite(+maxPages)?clamp(Math.round(+maxPages),1,5):wb.gatePolicy.maxPages,expectedRisk}
+    thresholds:{minAts:Number.isFinite(+minAts)?clamp(+minAts,0,100):wb.gatePolicy.minAts,minJobMatch:Number.isFinite(+minJobMatch)?clamp(+minJobMatch,0,100):wb.gatePolicy.minJobMatch,maxPages:Number.isFinite(+maxPages)?clamp(Math.round(+maxPages),1,5):wb.gatePolicy.maxPages,expectedRisk:['any','not-high'].includes(expectedRisk)?expectedRisk:'not-high'}
   };
   wb.testCases=[tc,...wb.testCases].slice(0,TEST_CASE_LIMIT);return tc;
 }
@@ -72,7 +70,7 @@ export function createTestCase(resume,{name='Caso de prueba',minAts,minJobMatch,
 export function deleteTestCase(resume,id){const wb=ensureWorkbench(resume);wb.testCases=wb.testCases.filter(t=>t.id!==id);return true}
 
 export function runTestCase(resume,testCase){
-  const r=clone(resume);r.target=clone(testCase.target);const a=analyzeResume(r,r.target),m=matchResumeToJob(r,r.target),plan=buildPagePlan(r),visual=templateAudit(r),th=testCase.thresholds||{};
+  const r=clone(resume);r.target=clone(testCase.target);const a=analyzeResume(r,r.target),m=a.match,plan=buildPagePlan(r),visual=templateAudit(r,a),th=testCase.thresholds||{};
   const checks=[
     {id:'ats',label:'ATS',value:a.score,threshold:th.minAts??75,pass:a.score>=(th.minAts??75)},
     {id:'match',label:'Job Match',value:m.score,threshold:th.minJobMatch??55,pass:m.score>=(th.minJobMatch??55)},
@@ -91,9 +89,9 @@ function statusFor(score,pass=80,warn=65){return score>=pass?'pass':score>=warn?
 
 export function runReleaseGate(resume,policyOverride={}){
   const wb=ensureWorkbench(resume),policy={...wb.gatePolicy,...policyOverride};
-  const ats=analyzeResume(resume,resume.target),integrity=exportIntegrityAudit(resume),coach=writingCoach(resume),quality=pageQuality(resume),visual=templateAudit(resume),plan=buildPagePlan(resume);
-  const match=resume.target?matchResumeToJob(resume,resume.target):null;
-  const basics=resume.basics||{},complete=[basics.fullName,basics.email,resume.summary,(resume.experience||[]).length,(resume.skillGroups||[]).flatMap(g=>g.skills||[]).length].filter(Boolean).length;
+  const ats=analyzeResume(resume,resume.target),plan=buildPagePlan(resume),visual=templateAudit(resume,ats),integrity=exportIntegrityAudit(resume,{analysis:ats,plan,visualAudit:visual}),coach=writingCoach(resume),quality=pageQuality(resume,{analysis:ats,plan}),preflight=exportChecklist(resume,{analysis:ats,pageEstimate:{pages:plan.pages.length}});
+  const match=resume.target?ats.match:null;
+  const basics=resume.basics||{},complete=[basics.fullName,basics.email,sectionVisible(resume,'summary')?resume.summary:'',sectionVisible(resume,'experience')?(resume.experience||[]).length:0,sectionVisible(resume,'skills')?(resume.skillGroups||[]).flatMap(g=>g.skills||[]).length:0].filter(Boolean).length;
   const completeness=Math.round(complete/5*100);
   const pageScore=plan.pages.length<=policy.maxPages&&!quality.pages.some(p=>p.pressure==='high')?100:plan.pages.length<=policy.maxPages+1?70:40;
   const writingScore=coach.items.length?coach.average:70;
@@ -104,16 +102,17 @@ export function runReleaseGate(resume,policyOverride={}){
     stage('ats','ATS',ats.score,ats.score>=policy.minAts?'pass':ats.score>=policy.minAts-10?'warn':'block',`mínimo configurado ${policy.minAts}`),
     stage('match','Job Match',matchScore,!match?'info':match.score>=policy.minJobMatch?'pass':match.score>=policy.minJobMatch-10?'warn':'block',match?`mínimo ${policy.minJobMatch}`:'Sin vacante objetivo: no bloquea'),
     stage('integrity','Integridad de exportación',integrity.score,integrity.sameFacts&&integrity.sameText?'pass':'block',integrity.sameFacts&&integrity.sameText?'ATS y presentación conservan hechos':'Diferencia entre variantes'),
+    stage('preflight','Preflight',preflight.score,preflight.blocks?'block':preflight.warnings?'warn':'pass',`${preflight.blocks} bloqueo(s) · ${preflight.warnings} advertencia(s)`),
     stage('writing','Redacción',writingScore,writingScore>=policy.minWriting?'pass':writingScore>=policy.minWriting-10?'warn':'block',`${coach.needsWork.length} bullet(s) con oportunidades`),
     stage('layout','Composición',pageScore,pageScore>=90?'pass':pageScore>=65?'warn':'block',`${plan.pages.length} página(s), máximo ${policy.maxPages}`),
     stage('visual','Riesgo visual',visualScore,visual.risk==='high'?'block':visual.risk==='medium'?'warn':'pass',`${visual.template} · ${visual.risk}`)
   ];
-  const weights={content:.12,ats:.2,match:.12,integrity:.2,writing:.12,layout:.12,visual:.12};
+  const weights={content:.10,ats:.18,match:.10,integrity:.18,preflight:.14,writing:.10,layout:.10,visual:.10};
   const scoredStages=stages.filter(s=>s.status!=='info'),weightTotal=scoredStages.reduce((n,s)=>n+(weights[s.id]||0),0)||1;
   const score=Math.round(scoredStages.reduce((n,s)=>n+s.score*(weights[s.id]||0),0)/weightTotal);
   const blocks=stages.filter(s=>s.status==='block'),warnings=stages.filter(s=>s.status==='warn');
   const status=blocks.length?'BLOCKED':warnings.length?'REVIEW':'READY';
-  return{status,score,ready:status==='READY',stages,blocks,warnings,policy,metrics:{ats:ats.score,jobMatch:match?.score??null,pages:plan.pages.length,writing:writingScore,visualRisk:visual.risk,integrity:integrity.score}};
+  return{status,score,ready:status==='READY',stages,blocks,warnings,policy,preflight,integrity,metrics:{ats:ats.score,jobMatch:match?.score??null,pages:plan.pages.length,writing:writingScore,visualRisk:visual.risk,integrity:integrity.score,preflight:preflight.score}};
 }
 
 export function recordRelease(resume,label='Release'){
@@ -126,6 +125,6 @@ export function compareReleaseRecords(a,b){
   return{score:delta(a.gate?.score,b.gate?.score),ats:delta(ma.ats,mb.ats),jobMatch:delta(ma.jobMatch,mb.jobMatch),pages:delta(ma.pages,mb.pages),writing:delta(ma.writing,mb.writing),sameFacts:(a.factHash||a.factFingerprint)===(b.factHash||b.factFingerprint),sameDesign:a.designHash&&b.designHash?a.designHash===b.designHash:null,sameRelease:a.releaseHash&&b.releaseHash?a.releaseHash===b.releaseHash:null};
 }
 
-export function workbenchSummary(resume){
-  const wb=ensureWorkbench(resume),gate=runReleaseGate(resume),suite=runTestSuite(resume);return{profiles:wb.releaseProfiles.length,tests:wb.testCases.length,releases:wb.releaseHistory.length,gateStatus:gate.status,gateScore:gate.score,testPassRate:suite.total?Math.round(suite.passed/suite.total*100):null};
+export function workbenchSummary(resume,{gate=null,suite=null}={}){
+  const wb=ensureWorkbench(resume),currentGate=gate||runReleaseGate(resume),currentSuite=suite||runTestSuite(resume);return{profiles:wb.releaseProfiles.length,tests:wb.testCases.length,releases:wb.releaseHistory.length,gateStatus:currentGate.status,gateScore:currentGate.score,testPassRate:currentSuite.total?Math.round(currentSuite.passed/currentSuite.total*100):null};
 }

@@ -1,9 +1,10 @@
 import {normalizeResume} from './schema.js?v=48';
-import {analyzeResume} from './ats-engine.js?v=48';
+import {analyzeResume,resumePlainText} from './ats-engine.js?v=48';
 import {matchResumeToJob,canonicalSkills} from './job-engine.js?v=48';
 import {writingCoach,pageQuality} from './local-premium.js?v=48';
 import {evidenceSummary} from './evidence.js?v=48';
 import {estimatePages} from './studio-engine.js?v=48';
+import {sectionVisible} from './section-catalog.js?v=48';
 
 const clamp=n=>Math.max(0,Math.min(100,Math.round(Number(n)||0)));
 const words=s=>String(s||'').trim().split(/\s+/).filter(Boolean);
@@ -15,7 +16,7 @@ const roleLabel={designer:'diseño de producto/UX',developer:'desarrollo de soft
 
 export function impactQuestions(resume,{limit=12}={}){
   const out=[];
-  for(const exp of resume?.experience||[]){
+  if(sectionVisible(resume,'experience'))for(const exp of resume?.experience||[]){
     for(const bullet of exp.bullets||[]){
       const text=String(bullet?.text||'').trim();if(!text||metric.test(text))continue;
       const skills=canonicalSkills(text).slice(0,3),subject=skills.length?skills.join(', '):'este trabajo';
@@ -31,29 +32,30 @@ export function impactQuestions(resume,{limit=12}={}){
   return out;
 }
 
-export function interviewQuestions(resume,{limit=12}={}){
+export function interviewQuestions(resume,{limit=12,match=null}={}){
   const out=[],seen=new Set(),add=(question,context='')=>{const q=String(question||'').trim();if(!q||seen.has(q)||out.length>=limit)return;seen.add(q);out.push({question:q,context})};
-  for(const exp of resume?.experience||[]){
+  if(sectionVisible(resume,'experience'))for(const exp of resume?.experience||[]){
     add(`Cuéntame sobre tu trabajo como ${exp.title||'profesional'} en ${exp.company||'esta empresa'}: ¿qué problema principal resolvías y cuál era tu responsabilidad directa?`,exp.company||'Experiencia');
     for(const bullet of (exp.bullets||[]).slice(0,3)){const text=String(bullet?.text||''),skills=canonicalSkills(text);if(skills.length)add(`Describe un caso concreto en el que utilizaste ${skills.slice(0,2).join(' y ')}. ¿Qué decisión técnica tomaste y por qué?`,exp.company||'Experiencia');if(/migr|moderniz/i.test(text))add('Explícame una migración de sistema legado de principio a fin: riesgos, estrategia, validación y resultado.',exp.company||'Experiencia');if(/docker|deploy|ci\/?cd/i.test(text))add('¿Cómo estructuraste el despliegue con Docker y qué problemas operativos resolvió?',exp.company||'Experiencia');if(/sql|procedim|base de datos/i.test(text))add('Dame un ejemplo de una consulta, procedimiento o problema de SQL que hayas optimizado y cómo verificaste la mejora.',exp.company||'Experiencia')}
   }
-  if(resume?.target){const match=matchResumeToJob(resume,resume.target);for(const req of match.matched.filter(x=>x.importance==='required').slice(0,4))add(`La vacante considera ${req.concept} un requisito. ¿Qué ejemplo de tu CV demuestra mejor tu dominio y qué aprendiste de ese caso?`,'Vacante objetivo')}
+  if(resume?.target){const currentMatch=match||matchResumeToJob(resume,resume.target);for(const req of currentMatch.matched.filter(x=>x.importance==='required').slice(0,4))add(`La vacante considera ${req.concept} un requisito. ¿Qué ejemplo de tu CV demuestra mejor tu dominio y qué aprendiste de ese caso?`,'Vacante objetivo')}
   return out.slice(0,limit);
 }
 
-export function exportChecklist(resume){
-  const r=resume||{},b=r.basics||{},ats=analyzeResume(r,r.target),pages=estimatePages(r),impact=impactQuestions(r,{limit:99}),totalBullets=(r.experience||[]).flatMap(e=>e.bullets||[]).filter(b=>String(b?.text||'').trim()).length,quantifiedBullets=Math.max(0,totalBullets-impact.length),impactCoverage=totalBullets?quantifiedBullets/totalBullets:0,items=[];
+export function exportChecklist(resume,{analysis=null,pageEstimate=null}={}){
+  const r=resume||{},b=r.basics||{},visibleExperience=sectionVisible(r,'experience')?(r.experience||[]):[],visibleSkills=sectionVisible(r,'skills')?(r.skillGroups||[]):[],summary=sectionVisible(r,'summary')?(r.summary||''):'',ats=analysis||analyzeResume(r,r.target),pages=pageEstimate||estimatePages(r),allBullets=visibleExperience.flatMap(e=>e.bullets||[]).filter(b=>String(b?.text||'').trim()),totalBullets=allBullets.length,quantifiedBullets=allBullets.filter(b=>metric.test(String(b?.text||''))).length,impactCoverage=totalBullets?quantifiedBullets/totalBullets:0,items=[];
   const add=(id,label,pass,detail,severity='warn')=>items.push({id,label,pass:!!pass,detail,severity:pass?'pass':severity});
   add('name','Nombre completo',words(b.fullName).length>=2,'Usa nombre y apellido.','block');
   add('email','Correo válido',/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.email||''),'Revisa el correo antes de enviar.','block');
   add('phone','Teléfono',String(b.phone||'').replace(/\D/g,'').length>=8,'Incluye un teléfono de contacto válido.','warn');
   add('headline','Titular profesional',words(b.headline).length>=2,'Haz visible el rol objetivo y especialidad.','warn');
-  add('summary','Perfil profesional',words(r.summary).length>=25&&words(r.summary).length<=110,`${words(r.summary).length} palabras; recomendado 25–110.`,'warn');
-  const headlineRole=roleFamily(b.headline),summaryRole=roleFamily(r.summary),roleConsistent=!headlineRole||!summaryRole||headlineRole===summaryRole;add('role-consistency','Coherencia de rol',roleConsistent,roleConsistent?'Titular y perfil no presentan roles profesionales contradictorios.':`El titular apunta a ${roleLabel[headlineRole]||headlineRole}, pero el perfil se describe como ${roleLabel[summaryRole]||summaryRole}. Revisa el texto antes de enviar.`,'block');
-  add('experience','Experiencia',Array.isArray(r.experience)&&r.experience.length>0,'Incluye al menos una experiencia relevante.','block');
-  add('skills','Skills visibles',(r.skillGroups||[]).flatMap(g=>g.skills||[]).length>=5,'Muestra al menos 5 skills relevantes.','warn');
-  add('placeholder','Sin placeholders',!placeholder.test(JSON.stringify({b,summary:r.summary,experience:r.experience})),'Se detectó texto con apariencia de ejemplo/placeholder.','block');
-  add('links','Enlaces válidos',![b.linkedin,b.website].filter(Boolean).some(badUrl),'LinkedIn/portafolio deben ser enlaces válidos.','warn');
+  add('summary','Perfil profesional',words(summary).length>=25&&words(summary).length<=110,`${words(summary).length} palabras; recomendado 25–110.`,'warn');
+  const headlineRole=roleFamily(b.headline),summaryRole=roleFamily(summary),roleConsistent=!headlineRole||!summaryRole||headlineRole===summaryRole;add('role-consistency','Coherencia de rol',roleConsistent,roleConsistent?'Titular y perfil no presentan roles profesionales contradictorios.':`El titular apunta a ${roleLabel[headlineRole]||headlineRole}, pero el perfil se describe como ${roleLabel[summaryRole]||summaryRole}. Revisa el texto antes de enviar.`,'block');
+  add('experience','Experiencia',visibleExperience.length>0,'Incluye al menos una experiencia relevante.','block');
+  add('skills','Skills visibles',visibleSkills.flatMap(g=>g.skills||[]).length>=5,'Muestra al menos 5 skills relevantes.','warn');
+  const genericLinks=Object.entries(r.genericSections||{}).flatMap(([id,items])=>sectionVisible(r,id)?(items||[]).map(it=>it?.url):[]),customLinks=(r.customSections||[]).flatMap(s=>sectionVisible(r,'custom:'+s.id)?(s.items||[]).map(it=>it?.url):[]),currentText=resumePlainText(r),links=[b.linkedin,b.website,...(sectionVisible(r,'projects')?(r.projects||[]).map(p=>p?.url):[]),...(sectionVisible(r,'certifications')?(r.certifications||[]).map(c=>c?.url):[]),...genericLinks,...customLinks].filter(Boolean);
+  add('placeholder','Sin placeholders',!placeholder.test(currentText),'Se detectó texto con apariencia de ejemplo/placeholder.','block');
+  add('links','Enlaces válidos',!links.some(badUrl),'LinkedIn, portafolio y URLs de proyectos/certificaciones deben ser enlaces válidos.','warn');
   add('pages','Paginación',pages.pages<=2,`${pages.pages} página(s) estimada(s).`,'warn');
   add('ats','ATS mínimo',ats.score>=75,`ATS ${ats.score}/100; recomendado ≥75.`,'warn');
   add('impact','Impacto demostrable',totalBullets>0&&quantifiedBullets>=1&&impactCoverage>=.30,totalBullets?`${quantifiedBullets}/${totalBullets} bullet(s) contienen señales cuantificables; recomendado ≥30%.`:'No hay bullets para evaluar impacto.','warn');
@@ -61,11 +63,11 @@ export function exportChecklist(resume){
   return{items,blocks,warnings,ready:blocks===0,score:clamp(items.reduce((n,x)=>n+(x.pass?1:x.severity==='warn'?.45:0),0)/items.length*100)};
 }
 
-export function cvScore(resume){
-  const ats=analyzeResume(resume,resume?.target),coach=writingCoach(resume),pages=pageQuality(resume),ev=evidenceSummary(resume),match=resume?.target?matchResumeToJob(resume,resume.target):null,check=exportChecklist(resume);
+export function cvScore(resume,{analysis=null,coach=null,quality=null,evidenceSummaryResult=null,checklist=null}={}){
+  const ats=analysis||analyzeResume(resume,resume?.target),writingCoachResult=coach||writingCoach(resume),pages=quality||pageQuality(resume,{analysis:ats}),ev=evidenceSummaryResult||evidenceSummary(resume),match=resume?.target?ats.match:null,check=checklist||exportChecklist(resume,{analysis:ats,pageEstimate:{pages:pages.pages.length}});
   const supported=(ev.verified||0)+(ev.careerFacts||0),evidence=ev.total?Math.min(100,35+supported/Math.max(1,ev.total)*65):55;
   const layout=pages.pages?.some?.(p=>p.pressure==='high')?55:pages.balance>=80?95:Math.max(65,pages.balance||70);
-  const writing=coach.items.length?coach.average:70;
+  const writing=writingCoachResult.items.length?writingCoachResult.average:70;
   const components={ats:ats.score,content:ats.scores.content,impact:ats.scores.impact,writing,layout,evidence,preflight:check.score,jobMatch:match?.score??null};
   const weights={ats:.20,content:.14,impact:.16,writing:.14,layout:.10,evidence:.08,preflight:.10,jobMatch:.08};
   const active=Object.entries(components).filter(([,v])=>typeof v==='number'),total=active.reduce((n,[k])=>n+(weights[k]||0),0)||1;
@@ -74,7 +76,7 @@ export function cvScore(resume){
 }
 
 export function printFitProfile(resume){
-  const est=estimatePages(resume),bullets=(resume?.experience||[]).reduce((n,e)=>n+(e.bullets||[]).filter(b=>String(b?.text||'').trim()).length,0),entries=(resume?.experience||[]).length+(resume?.education||[]).length+(resume?.projects||[]).length+(resume?.certifications||[]).length+(resume?.languages||[]).length,visible=(resume?.settings?.sectionOrder||[]).filter(x=>!(resume?.settings?.hiddenSections||[]).includes(x)).length;
+  const est=estimatePages(resume),bullets=sectionVisible(resume,'experience')?(resume?.experience||[]).reduce((n,e)=>n+(e.bullets||[]).filter(b=>String(b?.text||'').trim()).length,0):0,entries=(sectionVisible(resume,'experience')?(resume?.experience||[]).length:0)+(sectionVisible(resume,'education')?(resume?.education||[]).length:0)+(sectionVisible(resume,'projects')?(resume?.projects||[]).length:0)+(sectionVisible(resume,'certifications')?(resume?.certifications||[]).length:0)+(sectionVisible(resume,'languages')?(resume?.languages||[]).length:0)+(sectionVisible(resume,'achievements')?(resume?.achievements||[]).length:0)+Object.entries(resume?.genericSections||{}).reduce((n,[id,x])=>n+(sectionVisible(resume,id)?(x||[]).length:0),0)+(resume?.customSections||[]).reduce((n,s)=>n+(sectionVisible(resume,'custom:'+s.id)?(s.items||[]).length:0),0),visible=(resume?.settings?.sectionOrder||[]).filter(id=>sectionVisible(resume,id)).length;
   const load=est.words+bullets*10+entries*8+visible*20,ratio=load/535;
   const level=ratio<=.72?'light':ratio<=1.10?'medium':'strong';
   return{level,load,ratio:+ratio.toFixed(2),words:est.words,pages:est.pages};
@@ -101,6 +103,11 @@ export function mergeResumeContent(base,incoming){
   mergeCollection('certifications',x=>normKey([x.name,x.issuer].join('|')),(dest,item)=>fillBlank(dest,item,['date','url']));
   mergeCollection('languages',x=>normKey(x.language),(dest,item)=>fillBlank(dest,item,['level']));
   mergeCollection('achievements',x=>normKey([x.title,x.description].join('|')),(dest,item)=>fillBlank(dest,item,['date']));
+  const mergeGenericItems=(dest,source)=>{const target=Array.isArray(dest)?dest:[],byFingerprint=new Map();const fingerprint=item=>normKey([item?.title,item?.subtitle,item?.startDate].join('|'))||normKey(item?.url)||normKey(item?.description);for(const item of target){const fp=fingerprint(item);if(fp&&!byFingerprint.has(fp))byFingerprint.set(fp,item)}for(const item of source||[]){const fp=fingerprint(item);if(!fp)continue;const existing=byFingerprint.get(fp);if(existing){fillBlank(existing,item,['location','endDate','url','description']);mergeBullets(existing,item)}else{const copy=structuredClone(item);target.push(copy);byFingerprint.set(fp,copy)}}return target};
+  out.settings=out.settings||{};out.settings.sectionOrder=Array.isArray(out.settings.sectionOrder)?out.settings.sectionOrder:[];out.settings.hiddenSections=Array.isArray(out.settings.hiddenSections)?out.settings.hiddenSections:[];out.settings.sectionTitles=out.settings.sectionTitles&&typeof out.settings.sectionTitles==='object'?out.settings.sectionTitles:{};
+  for(const [sectionId,items] of Object.entries(src.genericSections||{})){out.genericSections[sectionId]=mergeGenericItems(out.genericSections?.[sectionId],items);if(src.settings?.sectionOrder?.includes(sectionId)&&!out.settings.sectionOrder.includes(sectionId)){out.settings.sectionOrder.push(sectionId);if(src.settings?.hiddenSections?.includes(sectionId)&&!out.settings.hiddenSections.includes(sectionId))out.settings.hiddenSections.push(sectionId)}if(!out.settings.sectionTitles[sectionId]&&src.settings?.sectionTitles?.[sectionId])out.settings.sectionTitles[sectionId]=src.settings.sectionTitles[sectionId]}
+  const customById=new Map((out.customSections||[]).map(s=>[s.id,s])),customByTitle=new Map((out.customSections||[]).filter(s=>normKey(s.title)).map(s=>[normKey(s.title),s]));
+  for(const section of src.customSections||[]){let target=customById.get(section.id)||customByTitle.get(normKey(section.title)),isNew=false;if(!target){target=structuredClone(section);out.customSections.push(target);customById.set(target.id,target);if(normKey(target.title))customByTitle.set(normKey(target.title),target);isNew=true}else target.items=mergeGenericItems(target.items,section.items);const token='custom:'+target.id,sourceToken='custom:'+section.id;if(!out.settings.sectionOrder.includes(token))out.settings.sectionOrder.push(token);if(isNew&&src.settings?.hiddenSections?.includes(sourceToken)&&!out.settings.hiddenSections.includes(token))out.settings.hiddenSections.push(token)}
   const groups=new Map((out.skillGroups||[]).map(g=>[normKey(g.name)||'habilidades',g]));
   for(const g of src.skillGroups||[]){const key=normKey(g.name)||'habilidades',existing=groups.get(key);if(existing){existing.skills=Array.isArray(existing.skills)?existing.skills:[];const have=new Set(existing.skills.map(normKey));for(const skill of g.skills||[]){const fp=normKey(skill);if(fp&&!have.has(fp)){existing.skills.push(skill);have.add(fp)}}}else{const copy=structuredClone(g);out.skillGroups.push(copy);groups.set(key,copy)}}
   const evidence=Array.isArray(out.evidenceVault)?out.evidenceVault:[],seenEvidence=new Set(evidence.map(e=>normKey([e?.type,e?.anchor,e?.title,e?.text,e?.quote,e?.fileName,e?.page].join('|'))));

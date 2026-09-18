@@ -9,7 +9,7 @@ import {estimatePages,moveSection,toggleSection,addSection} from '../src/studio-
 import {STUDIO_PACKS,ensureDesignVariants,switchDesignVariant,applyStudioPack,compositionReport,compareVersion,maybeAutoSnapshot} from '../src/studio-pro.js';
 import {RESUME_MODES,applyResumeMode,assignSectionColumn,togglePageBreak,setPageStrategy,buildPagePlan,templateAudit,importReview} from '../src/local-pro.js';
 import {TEMPLATE_COLLECTIONS,writingCoach,snapshotDiff,exportIntegrityAudit,pageQuality,factFingerprint} from '../src/local-premium.js';
-import {createThemeRecipe,applyThemeRecipe,recipeFromResume,recipeSummary,sanitizeRecipeLibrary,normalizeThemeRecipe,FORGE_LIMIT} from '../src/template-forge.js';
+import {createThemeRecipe,applyThemeRecipe,recipeFromResume,recipeSummary,sanitizeRecipeLibrary,normalizeThemeRecipe,validateThemeRecipe,FORGE_LIMIT} from '../src/template-forge.js';
 import {localAiContext,auditLocalAiSuggestion,applyLocalAiSuggestion,unsupportedClaimTerms,LOCAL_AI_TASKS,localAiPrivacyStatement} from '../src/local-ai.js';
 import {ensureWorkbench,captureReleaseProfile,applyReleaseProfile,deleteReleaseProfile,createTestCase,deleteTestCase,runTestCase,runTestSuite,runReleaseGate,recordRelease,compareReleaseRecords,workbenchSummary,PROFILE_LIMIT,TEST_CASE_LIMIT,RELEASE_HISTORY_LIMIT} from '../src/resume-workbench.js';
 import {readJsonStorage,persistState,persistJsonBundle,captureStorage,restoreStorage,snapshotResume,compactResumeHistory,MAX_MANUAL_VERSIONS,MAX_AUTO_VERSIONS,persistedResumeTimestamp,hasNewerPersistedResume} from '../src/storage.js';
@@ -20,9 +20,9 @@ import {indexedDbAvailable,createDurableEnvelope,normalizeDurableEnvelope,compar
 import {createTabSync} from '../src/tab-sync.js';
 import {resolveConflictState} from '../src/conflict-resolver.js';
 import {APP_MAJOR,APP_VERSION,storageKey,legacyStorageKeys} from '../src/version.js';
-import {chatGptResumeSnapshot,tunnelCommands,applyBridgeEditProposal,formatBridgeProposalValue,proposalLocationLabel} from '../src/chatgpt-bridge.js';
+import {chatGptResumeSnapshot,praxisNodeConnectionGuide,syncChatGptBridge,disableChatGptBridge,getChatGptBridgeState,resolveChatGptBridgeProposal,applyBridgeEditProposal,formatBridgeProposalValue,proposalLocationLabel} from '../src/chatgpt-bridge.js';
 import {cvScore,exportChecklist,impactQuestions,interviewQuestions,printFitProfile,professionalFilename,mergeResumeContent} from '../src/resume-intelligence.js';
-import {buildExportDocument,buildExportPdfPayload,exportDocumentSpec} from '../src/export-document.js';
+import {buildExportDocument,buildExportPdfPayload,exportDocumentSpec,exportDocumentSignature} from '../src/export-document.js';
 
 
 test('biblioteca personal contiene 528 presets unicos',()=>{
@@ -104,6 +104,49 @@ test('gestor de secciones reordena oculta y agrega',()=>{
 
 test('vista ATS conserva contenido esencial',()=>{const t=atsTextView(defaultResume());assert.match(t,/Ana García López/);assert.match(t,/EXPERIENCIA PROFESIONAL/);assert.match(t,/HABILIDADES/)});
 
+test('v48 preview y ATS conservan fechas y URLs estructuradas',()=>{
+  const r=defaultResume();r.settings.sectionOrder.push('achievements');r.projects=[{id:'p_fields',name:'Portal QA',role:'Full Stack',url:'https://example.com/portal',startDate:'2024',endDate:'2025',description:'Proyecto verificable',bullets:[{id:'pb_fields',text:'Automaticé despliegues'}]}];r.certifications=[{id:'c_fields',name:'Cert QA',issuer:'Entidad',date:'2025',url:'https://example.com/cert'}];r.achievements=[{id:'a_fields',title:'Premio QA',date:'2026',description:'Reconocimiento técnico'}];
+  const html=renderResumeHtml(r),ats=atsTextView(r);
+  for(const value of ['https://example.com/portal','2024','2025','https://example.com/cert','Premio QA','2026']){assert.ok(html.includes(value),value);assert.ok(ats.includes(value),value)}
+});
+
+test('v48 secciones genéricas y personalizadas conservan URL en preview, ATS y validación',()=>{
+  const r=defaultResume(),pub=makeGenericItem('publications','Artículo técnico');pub.url='https://example.com/paper?utm_source=cv';pub.description='Arquitectura distribuida';r.genericSections.publications=[pub];addSection(r,'publications');
+  r.customSections=[{id:'custom_links',title:'Portafolio adicional',icon:'＋',items:[{id:'custom_item_link',type:'custom-item',title:'Caso técnico',subtitle:'',location:'',startDate:'2025',endDate:'2026',url:'https://example.com/case',description:'Caso verificable',bullets:[]}]}];r.settings.sectionOrder.push('custom:custom_links');
+  const html=renderResumeHtml(r),ats=atsTextView(r),analysis=analyzeResume(r);
+  for(const url of [pub.url,'https://example.com/case']){assert.ok(html.includes(url),url);assert.ok(ats.includes(url),url)}
+  assert.equal(analysis.checks.find(x=>x.id==='links')?.pass,false);
+});
+
+test('v48 firma de exportación cambia al editar contenido genérico/custom sin depender de updatedAt',()=>{
+  const r=defaultResume(),item=makeGenericItem('publications','Artículo');item.url='https://example.com/a';r.genericSections.publications=[item];addSection(r,'publications');
+  const before=exportDocumentSignature(r),stamp=r.updatedAt;r.genericSections.publications[0].url='https://example.com/b';assert.equal(r.updatedAt,stamp);assert.notEqual(exportDocumentSignature(r),before);
+  r.customSections=[{id:'custom_signature',title:'Custom',icon:'＋',items:[{id:'ci_signature',type:'custom-item',title:'Caso',subtitle:'',location:'',startDate:'',endDate:'',url:'https://example.com/c1',description:'',bullets:[]}]}];r.settings.sectionOrder.push('custom:custom_signature');
+  const customBefore=exportDocumentSignature(r);r.customSections[0].items[0].url='https://example.com/c2';assert.notEqual(exportDocumentSignature(r),customBefore);
+});
+
+test('v48 Job Match reconoce idiomas y evidencia en secciones personalizadas',()=>{
+  const r=defaultResume();r.languages=[{id:'lang_en',language:'English',level:'C1'}];r.customSections=[{id:'custom_cloud',title:'Stack adicional',icon:'＋',items:[{id:'ci_cloud',type:'custom-item',title:'Cloud',subtitle:'',location:'',startDate:'',endDate:'',url:'',description:'Trabajé con Kubernetes en producción.',bullets:[]}]}];r.settings.sectionOrder.push('custom:custom_cloud');
+  const job=parseJobDescription('English is required. Kubernetes required.',{role:'Platform Engineer'}),match=matchResumeToJob(r,job);
+  const english=match.requirements.find(x=>x.concept==='english'),k8s=match.requirements.find(x=>x.concept==='kubernetes');assert.equal(english?.status,'matched');assert.equal(k8s?.status,'partial');assert.ok(k8s?.evidenceFound?.some(x=>/Stack adicional/.test(x.where)));
+});
+
+test('v48 ATS y Job Match ignoran evidencia de secciones ocultas',()=>{
+  const r=defaultResume();r.skillGroups=[{id:'skills_hidden',name:'Infra',skills:['Kubernetes']}];
+  const job=parseJobDescription('Kubernetes is required.',{role:'Platform Engineer'});
+  assert.equal(matchResumeToJob(r,job).requirements.find(x=>x.concept==='kubernetes')?.status,'partial');
+  const visibleWords=analyzeResume(r,job).metrics.wordCount;r.settings.hiddenSections=[...(r.settings.hiddenSections||[]),'skills'];
+  assert.equal(matchResumeToJob(r,job).requirements.find(x=>x.concept==='kubernetes')?.status,'missing');
+  assert.ok(analyzeResume(r,job).metrics.wordCount<visibleWords);
+});
+
+test('v48 plan de páginas y composición incluyen Logros visibles',()=>{
+  const r=defaultResume();r.settings.sectionOrder.push('achievements');r.achievements=[{id:'ach_plan',title:'Premio técnico',date:'2026',description:'impacto '.repeat(160)}];
+  const plan=buildPagePlan(r),report=compositionReport(r);
+  assert.ok(plan.pages.some(p=>p.sections.some(s=>s.id==='achievements')));assert.ok(report.sections.some(s=>s.id==='achievements'&&s.words>100));
+  r.settings.sectionOrder=r.settings.sectionOrder.filter(id=>id!=='achievements');assert.equal(compositionReport(r).sections.some(s=>s.id==='achievements'),false);
+});
+
 test('job match distingue requisitos y genera score',()=>{const r=defaultResume();r.skillGroups[0].skills.push('SQL','Python');r.experience[0].bullets.push({id:'b_py',text:'Desarrollé automatizaciones con Python y SQL para análisis de producto.'});const job=parseJobDescription('Buscamos Senior Product Designer. Requerido: Figma, UX Research, SQL y Python. Deseable: AWS. Experiencia de 5 años trabajando con producto y equipos multidisciplinares.',{role:'Senior Product Designer'});const m=matchResumeToJob(r,job);assert.equal(typeof m.score,'number');assert.ok(m.matched.some(x=>['python','sql','figma'].includes(x.concept)))});
 
 
@@ -121,6 +164,12 @@ function storedZipEntry(bytes,target){
 }
 test('DOCX se genera como ZIP OpenXML',()=>{const bytes=buildDocxBytes(defaultResume());assert.equal(bytes[0],0x50);assert.equal(bytes[1],0x4b);assert.ok(bytes.length>1000)});
 
+test('v48 DOCX respeta el papel A4 o Letter configurado',()=>{
+  const a4=defaultResume(),letter=defaultResume();letter.settings.paper='letter';
+  const a4Xml=storedZipEntry(buildDocxBytes(a4),'word/document.xml'),letterXml=storedZipEntry(buildDocxBytes(letter),'word/document.xml');
+  assert.match(a4Xml,/w:pgSz w:w="11906" w:h="16838"/);assert.match(letterXml,/w:pgSz w:w="12240" w:h="15840"/);
+});
+
 test('v28 DOCX elimina caracteres prohibidos por XML 1.0',()=>{
   const r=defaultResume();r.basics.fullName='QA\u0001 Nombre\u000B Seguro';r.summary='Texto\u0000 válido & < > con control\u001F.';
   const xml=storedZipEntry(buildDocxBytes(r),'word/document.xml');assert.ok(xml);
@@ -134,6 +183,14 @@ test('todos los presets son coherentes',()=>{const allowed=new Set(TEMPLATE_FAMI
 
 
 test('Studio Pro mantiene dos diseños sobre los mismos hechos',()=>{const r=defaultResume(),facts=JSON.stringify({summary:r.summary,experience:r.experience,skills:r.skillGroups});ensureDesignVariants(r);switchDesignVariant(r,'ats');const atsId=r.settings.templateId;switchDesignVariant(r,'presentation');assert.equal(JSON.stringify({summary:r.summary,experience:r.experience,skills:r.skillGroups}),facts);assert.notEqual(atsId,'');assert.equal(r.settings.activeDesignVariant,'presentation')});
+
+test('v48 variantes ATS/Presentación conservan estilos visuales independientes',()=>{
+  const r=defaultResume();ensureDesignVariants(r);switchDesignVariant(r,'ats');Object.assign(r.settings,{headerStyle:'minimal',headingStyle:'caps',dividerStyle:'solid',contactStyle:'stacked'});switchDesignVariant(r,'presentation');
+  Object.assign(r.settings,{headerStyle:'centered',headingStyle:'pill',dividerStyle:'none',contactStyle:'inline'});switchDesignVariant(r,'ats');
+  assert.equal(r.settings.headerStyle,'minimal');assert.equal(r.settings.headingStyle,'caps');assert.equal(r.settings.dividerStyle,'solid');assert.equal(r.settings.contactStyle,'stacked');
+  switchDesignVariant(r,'presentation');assert.equal(r.settings.headerStyle,'centered');assert.equal(r.settings.headingStyle,'pill');assert.equal(r.settings.dividerStyle,'none');assert.equal(r.settings.contactStyle,'inline');
+  const normalized=normalizeResume(r);assert.equal(normalized.settings.designVariants.ats.headerStyle,'minimal');assert.equal(normalized.settings.designVariants.presentation.headingStyle,'pill');
+});
 
 test('Studio Pack crea par ATS y presentación',()=>{const r=defaultResume();const p=applyStudioPack(r,'software');assert.equal(p.id,'software');assert.equal(r.settings.designVariants.ats.layout,'single');assert.match(r.settings.designVariants.ats.templateId,/developer|ats|technical/);assert.ok(r.settings.designVariants.presentation.templateId);assert.equal(STUDIO_PACKS.length,16)});
 
@@ -167,9 +224,17 @@ test('Snapshot diff detecta cambios de contenido y diseño',()=>{const old=defau
 test('Page Quality produce balance y presión por página',()=>{const r=defaultResume();r.summary='perfil '.repeat(450);setPageStrategy(r,'two');const q=pageQuality(r);assert.ok(q.pages.length>=2);assert.equal(typeof q.balance,'number');assert.equal(typeof q.recommendation,'string')});
 
 
-test('Template Forge guarda una receta sin cambiar hechos',()=>{const r=defaultResume(),before=factFingerprint(r);r.settings.accent='#123456';r.settings.headerStyle='band';const recipe=recipeFromResume(r,'Mi diseño');assert.equal(recipe.name,'Mi diseño');assert.equal(recipe.overrides.accent,'#123456');const target=defaultResume(),facts=factFingerprint(target);applyThemeRecipe(target,recipe);assert.equal(factFingerprint(target),facts);assert.equal(target.settings.forgeRecipeName,'Mi diseño');assert.equal(target.settings.headerStyle,'band');assert.equal(before,factFingerprint(r))});
+test('Template Forge guarda una receta sin cambiar hechos',()=>{const r=defaultResume(),before=factFingerprint(r);Object.assign(r.settings,{accent:'#123456',headerStyle:'band',showIcons:false,photoZoom:1.8,photoX:12,photoY:-7});const recipe=recipeFromResume(r,'Mi diseño');assert.equal(recipe.name,'Mi diseño');assert.equal(recipe.overrides.accent,'#123456');assert.equal(recipe.overrides.showIcons,false);assert.equal(recipe.overrides.photoZoom,1.8);const target=defaultResume(),facts=factFingerprint(target);applyThemeRecipe(target,recipe);assert.equal(factFingerprint(target),facts);assert.equal(target.settings.forgeRecipeName,'Mi diseño');assert.equal(target.settings.headerStyle,'band');assert.equal(target.settings.showIcons,false);assert.equal(target.settings.photoZoom,1.8);assert.equal(target.settings.photoX,12);assert.equal(target.settings.photoY,-7);assert.equal(before,factFingerprint(r))});
+
+test('v48 plantilla normal limpia todos los metadatos de Template Forge',()=>{
+  const r=defaultResume();applyThemeRecipe(r,recipeFromResume(r,'Temporal'));assert.ok(r.settings.forgeRecipeId);assert.equal(r.settings.forgeRecipeVersion,1);applyTemplateToResume(r,'modern-navy');assert.equal(r.settings.forgeRecipeId,undefined);assert.equal(r.settings.forgeRecipeName,undefined);assert.equal(r.settings.forgeRecipeVersion,undefined);
+});
 
 test('Template Forge normaliza tokens inválidos y resume riesgo',()=>{const recipe=createThemeRecipe('ats-ink','Prueba',{layout:'xx',accent:'red',fontScale:9});const summary=recipeSummary(recipe);assert.equal(recipe.overrides.layout,'single');assert.match(recipe.overrides.accent,/^#/);assert.ok(recipe.overrides.fontScale<=1.18);assert.equal(summary.risk,'low')});
+
+test('v48 Template Forge reporta baseId inexistente en validación',()=>{
+  const result=validateThemeRecipe({id:'bad_recipe',name:'Rota',baseId:'preset-inexistente',overrides:{}});assert.equal(result.ok,false);assert.ok(result.issues.some(x=>/base inválido/i.test(x)));assert.equal(result.recipe.baseId,PERSONAL_TEMPLATES[0].id);
+});
 
 test('Template Forge deduplica y limita la biblioteca local',()=>{const x=createThemeRecipe('modern-navy','A');const items=Array.from({length:FORGE_LIMIT+15},(_,i)=>({...x,id:i<2?'dup':`id_${i}`,name:`T${i}`}));const clean=sanitizeRecipeLibrary(items);assert.ok(clean.length<=FORGE_LIMIT);assert.equal(clean.filter(r=>r.id==='dup').length,1)});
 
@@ -193,12 +258,20 @@ test('Test Lab congela vacante y no cambia target actual al ejecutar',()=>{const
 
 test('Test Suite reporta pass y fail por umbrales',()=>{const r=defaultResume();r.target=parseJobDescription('Product Designer requerido: Figma, UX Research, Design Systems, accesibilidad, prototipado y experiencia de producto.',{role:'Product Designer'});const easy=createTestCase(r,{name:'Easy',minAts:0,minJobMatch:0,maxPages:5,expectedRisk:'any'});const hard={...easy,id:'hard',name:'Hard',thresholds:{...easy.thresholds,minAts:100,minJobMatch:100,maxPages:1,expectedRisk:'not-high'}};const suite=runTestSuite(r,[easy,hard]);assert.equal(suite.total,2);assert.ok(suite.passed>=1);assert.ok(suite.failed>=1);deleteTestCase(r,easy.id)});
 
-test('Release Gate detecta integridad y produce etapas explicables',()=>{const r=defaultResume();const gate=runReleaseGate(r);assert.equal(gate.stages.length,7);assert.ok(['READY','REVIEW','BLOCKED'].includes(gate.status));assert.equal(typeof gate.score,'number');assert.equal(gate.metrics.integrity,100)});
+test('Release Gate detecta integridad y produce etapas explicables',()=>{const r=defaultResume();const gate=runReleaseGate(r);assert.equal(gate.stages.length,8);assert.ok(['READY','REVIEW','BLOCKED'].includes(gate.status));assert.equal(typeof gate.score,'number');assert.equal(gate.metrics.integrity,100);assert.equal(typeof gate.metrics.preflight,'number')});
 
 test('Release Gate bloquea un CV deliberadamente incompleto',()=>{const r=defaultResume();r.basics.fullName='';r.basics.email='';r.summary='';r.experience=[];r.skillGroups=[];const gate=runReleaseGate(r,{minAts:90,minWriting:80});assert.equal(gate.status,'BLOCKED');assert.ok(gate.blocks.length>=1)});
 
+test('v48 Release Gate nunca declara READY si Preflight tiene un bloqueo',()=>{const r=defaultResume();r.basics.headline='Desarrollador Full Stack | Angular';r.summary='Product Designer con seis años de experiencia creando productos digitales centrados en personas y negocio, liderando research, prototipado y diseño de interfaces complejas para equipos multidisciplinares.';r.experience[0].bullets=[{id:'g1',text:'Lideré iniciativas de producto aumentando activación 28% con equipos multidisciplinares.'},{id:'g2',text:'Diseñé flujos y prototipos reduciendo errores 20% para usuarios internos.'},{id:'g3',text:'Coordiné research mejorando satisfacción 15% con evidencia verificable.'}];const gate=runReleaseGate(r,{minAts:0,minWriting:0,maxPages:5,minJobMatch:0}),preflight=gate.stages.find(x=>x.id==='preflight');assert.equal(gate.preflight.blocks,1);assert.equal(preflight.status,'block');assert.equal(gate.status,'BLOCKED');assert.equal(gate.ready,false)});
+
 test('Release History conserva métricas y permite comparar',()=>{const r=defaultResume();const a=recordRelease(r,'A');r.summary='';const b=recordRelease(r,'B');const d=compareReleaseRecords(b,a);assert.equal(ensureWorkbench(r).releaseHistory.length,2);assert.equal(typeof d.score,'number');assert.equal(d.sameFacts,false)});
 test('Release reproducible distingue hechos, diseño y vacante con hashes estables',()=>{const r=defaultResume(),a=recordRelease(r,'Base');assert.match(a.factHash,/^[0-9a-f]{8}$/);assert.match(a.designHash,/^[0-9a-f]{8}$/);assert.match(a.targetHash,/^[0-9a-f]{8}$/);assert.match(a.releaseHash,/^[0-9a-f]{8}$/);const same=recordRelease(r,'Mismo');assert.equal(a.releaseHash,same.releaseHash);r.settings.accent='#123456';const visual=recordRelease(r,'Visual');assert.equal(visual.factHash,a.factHash);assert.notEqual(visual.designHash,a.designHash);assert.notEqual(visual.releaseHash,a.releaseHash)});
+
+test('v48 normalización conserva hashes reproducibles del historial de releases',()=>{
+  const r=defaultResume(),a=recordRelease(r,'Base');r.settings.accent='#123456';const b=recordRelease(r,'Visual'),normalized=normalizeResume(r),[nb,na]=normalized.workbench.releaseHistory;
+  assert.equal(na.designHash,a.designHash);assert.equal(na.targetHash,a.targetHash);assert.equal(na.releaseHash,a.releaseHash);assert.equal(nb.designHash,b.designHash);assert.equal(nb.releaseHash,b.releaseHash);
+  const diff=compareReleaseRecords(nb,na);assert.equal(diff.sameFacts,true);assert.equal(diff.sameDesign,false);assert.equal(diff.sameRelease,false);
+});
 
 test('Workbench respeta límites de perfiles, tests y releases',()=>{const r=defaultResume(),wb=ensureWorkbench(r);for(let i=0;i<PROFILE_LIMIT+5;i++)captureReleaseProfile(r,`P${i}`);assert.equal(wb.releaseProfiles.length,PROFILE_LIMIT);r.target=parseJobDescription('Product Designer requerido: Figma, UX Research, Design Systems y experiencia colaborando con equipos multidisciplinares.',{role:'PD'});for(let i=0;i<TEST_CASE_LIMIT+5;i++)createTestCase(r,{name:`T${i}`});assert.equal(wb.testCases.length,TEST_CASE_LIMIT);for(let i=0;i<RELEASE_HISTORY_LIMIT+5;i++)recordRelease(r,`R${i}`);assert.equal(wb.releaseHistory.length,RELEASE_HISTORY_LIMIT)});
 
@@ -245,7 +318,7 @@ test('v22 auditor factual permite paráfrasis conservadora',()=>{
 });
 
 test('v22 Release Gate excluye Job Match del promedio cuando no hay vacante',()=>{
-  const r=defaultResume();r.target=null;const gate=runReleaseGate(r),weights={content:.12,ats:.2,integrity:.2,writing:.12,layout:.12,visual:.12},scored=gate.stages.filter(x=>x.id!=='match'),expected=Math.round(scored.reduce((n,x)=>n+x.score*weights[x.id],0)/Object.values(weights).reduce((a,b)=>a+b,0));const matchStage=gate.stages.find(x=>x.id==='match');assert.equal(matchStage.status,'info');assert.equal(matchStage.score,null);assert.equal(gate.score,expected);
+  const r=defaultResume();r.target=null;const gate=runReleaseGate(r),weights={content:.10,ats:.18,integrity:.18,preflight:.14,writing:.10,layout:.10,visual:.10},scored=gate.stages.filter(x=>x.id!=='match'),expected=Math.round(scored.reduce((n,x)=>n+x.score*weights[x.id],0)/Object.values(weights).reduce((a,b)=>a+b,0));const matchStage=gate.stages.find(x=>x.id==='match');assert.equal(matchStage.status,'info');assert.equal(matchStage.score,null);assert.equal(gate.score,expected);
 });
 
 
@@ -1014,6 +1087,12 @@ test('v44 evidencia normaliza origen, página y verificación sin aceptar basura
   const r=defaultResume();r.evidenceVault=evidence;const summary=evidenceSummary(r);assert.equal(summary.total,1);assert.equal(summary.verified,1);assert.equal(summary.pages,1);
 });
 
+test('v48 normalizeEvidence conserva timestamps al reprocesar evidencia existente',()=>{
+  const original={id:'ev_stable',field:'experience.0',quote:'Reduje 20 minutos',sourceKind:'pdf',fileName:'cv.pdf',createdAt:111,updatedAt:222,verified:true};
+  const first=normalizeEvidence([original],{sourceKind:'pdf',fileName:'cv.pdf',model:'local'})[0],second=normalizeEvidence([first],{sourceKind:'pdf',fileName:'cv.pdf',model:'local'})[0];
+  assert.equal(first.createdAt,111);assert.equal(first.updatedAt,222);assert.equal(second.createdAt,111);assert.equal(second.updatedAt,222);assert.equal(second.id,'ev_stable');
+});
+
 test('v44 paginación visual calcula guías y ajustar a una página sólo compacta diseño',()=>{
   const r=defaultResume();r.summary='Experiencia '.repeat(900);const facts=JSON.stringify({experience:r.experience,education:r.education,skillGroups:r.skillGroups,summary:r.summary});const model=pageGuideModel(r);assert.ok(model.pages>=1);
   const result=fitOnePageSettings(r);assert.equal(r.settings.pageStrategy,'one');assert.equal(r.settings.density,'compact');assert.equal(r.settings.margin,'narrow');assert.equal(r.settings.lineHeight,'compact');assert.ok(r.settings.fontScale>=.85);assert.equal(JSON.stringify({experience:r.experience,education:r.education,skillGroups:r.skillGroups,summary:r.summary}),facts);assert.equal(result.after.pageStrategy,'one');
@@ -1071,6 +1150,12 @@ test('v46 IndexedDB: envelope durable detecta corrupción y ordena por revisión
 test('v46 IndexedDB: envelope legado v45 se promueve sin perder estado',()=>{
   const r=defaultResume();r.title='Legado durable';r.updatedAt=456;const state={documents:[{id:'x',resume:r,updatedAt:456}],currentId:'x',jobText:''};
   const env=normalizeDurableEnvelope({savedAt:500,state});assert.ok(env);assert.equal(env.revision,0);assert.equal(env.savedAt,500);assert.equal(env.state.documents[0].resume.title,'Legado durable');
+});
+
+test('v48 IndexedDB: conserva snapshots v46 sin digest y rechaza esquemas futuros desconocidos',()=>{
+  const r=defaultResume(),state={documents:[{id:'x',resume:r,updatedAt:1}],currentId:'x',jobText:''},env=createDurableEnvelope(state,{revision:2,savedAt:2,appVersion:'48'});
+  const missingDigest=structuredClone(env);delete missingDigest.digest;assert.ok(normalizeDurableEnvelope(missingDigest));
+  const future=structuredClone(env);future.schema=99;assert.equal(normalizeDurableEnvelope(future),null);
 });
 
 test('v46 IndexedDB: un commit atrasado no puede sobrescribir una revisión durable más nueva',async()=>{
@@ -1158,8 +1243,21 @@ test('ChatGPT bridge snapshot omite foto e historiales locales',()=>{
   const snap=chatGptResumeSnapshot(r);assert.equal(snap.id,r.id);assert.equal(snap.basics.photo,undefined);assert.equal(snap.versions,undefined);assert.equal(snap.autoVersions,undefined);assert.equal(snap.workbench,undefined);assert.equal(snap.evidenceVault,undefined);
 });
 
-test('ChatGPT bridge genera comandos de tunnel sin aceptar caracteres inseguros',()=>{
-  const cmd=tunnelCommands('tunnel_demo && calc');assert.equal(cmd.endpoint,'http://127.0.0.1:4173/mcp');assert.ok(cmd.init.includes('--profile hoja-personal'));assert.ok(cmd.init.includes('--mcp-server-url http://127.0.0.1:4173/mcp'));assert.equal(cmd.init.includes('&&'),false);assert.equal(cmd.run,'tunnel-client run --profile hoja-personal');
+test('ChatGPT bridge describe la conexión actual con PraxisNode sin inventar estado del túnel',()=>{
+  const guide=praxisNodeConnectionGuide({mcpEndpoint:'http://127.0.0.1:4173/mcp',praxisNodeDefaultDetected:true,praxisNodeDefaultMcpEndpoint:'http://127.0.0.1:47321/mcp',praxisNodeTunnelProfile:'praxisnode'});
+  assert.equal(guide.masterCvMcpEndpoint,'http://127.0.0.1:4173/mcp');assert.equal(guide.praxisNodeDefaultMcpEndpoint,'http://127.0.0.1:47321/mcp');assert.equal(guide.defaultTunnelProfile,'praxisnode');assert.equal(guide.defaultDetected,true);assert.match(guide.secondaryInstanceNote,/secundarias/i);
+});
+
+test('ChatGPT bridge cubre sync, estado, disable y resolve HTTP',async()=>{
+  const original=globalThis.fetch,calls=[];globalThis.fetch=async(url,options={})=>{calls.push([url,options]);const payload=url.endsWith('/status')?{enabled:true}:url.endsWith('/pending')?{pending:[{id:'p1'}]}:{ok:true};return{ok:true,status:200,json:async()=>payload}};
+  try{
+    assert.equal((await syncChatGptBridge({resume:{id:'r1'}})).ok,true);assert.equal((await disableChatGptBridge()).ok,true);const state=await getChatGptBridgeState();assert.equal(state.status.enabled,true);assert.equal(state.pending[0].id,'p1');assert.equal((await resolveChatGptBridgeProposal('p1','rejected')).ok,true);assert.equal(calls.length,5);
+  }finally{globalThis.fetch=original}
+});
+
+test('ChatGPT bridge propaga errores HTTP del servidor',async()=>{
+  const original=globalThis.fetch;globalThis.fetch=async()=>({ok:false,status:422,json:async()=>({error:'rechazado por QA'})});
+  try{await assert.rejects(()=>syncChatGptBridge({resume:{id:'r1'}}),/rechazado por QA/)}finally{globalThis.fetch=original}
 });
 
 
@@ -1233,6 +1331,16 @@ test('Merge de CV conserva campos completos y añade colecciones nuevas sin dupl
   const base=defaultResume(),incoming=defaultResume();base.basics.email='real@example.com';incoming.basics.email='otro@example.com';incoming.experience.push({...incoming.experience[0],id:'newexp',company:'Empresa Nueva',title:'Backend Engineer',startDate:'2025'});incoming.skillGroups=[{id:'newg',name:'Habilidades',skills:['Figma','Docker']}];const merged=mergeResumeContent(base,incoming);assert.equal(merged.basics.email,'real@example.com');assert.equal(merged.experience.filter(x=>x.company==='Empresa Nueva').length,1);assert.equal(merged.experience.filter(x=>x.company===base.experience[0].company&&x.title===base.experience[0].title).length,1);assert.ok(merged.skillGroups.flatMap(g=>g.skills).includes('Docker'));
 });
 
+
+test('v48 Merge de CV conserva secciones genéricas/custom y su estructura',()=>{
+  const base=defaultResume(),incoming=defaultResume();
+  const pub=makeGenericItem('publications','Artículo distribuido');Object.assign(pub,{url:'https://example.com/paper',description:'Paper técnico'});incoming.genericSections.publications=[pub];incoming.settings.sectionOrder.push('publications');incoming.settings.hiddenSections.push('publications');incoming.settings.sectionTitles.publications='Publicaciones seleccionadas';
+  base.customSections=[{id:'custom_portfolio_base',title:'Casos especiales',icon:'＋',items:[{id:'ci_base',type:'custom-item',title:'Caso A',subtitle:'',location:'',startDate:'',endDate:'',url:'',description:'Base',bullets:[]}]}];base.settings.sectionOrder.push('custom:custom_portfolio_base');
+  incoming.customSections=[{id:'custom_portfolio_in',title:'Casos especiales',icon:'＋',items:[{id:'ci_in',type:'custom-item',title:'Caso B',subtitle:'',location:'',startDate:'',endDate:'',url:'https://example.com/case-b',description:'Importado',bullets:[]}]}];incoming.settings.sectionOrder.push('custom:custom_portfolio_in');
+  const merged=mergeResumeContent(base,incoming),custom=merged.customSections.find(s=>s.title==='Casos especiales');
+  assert.equal(merged.genericSections.publications.length,1);assert.equal(merged.genericSections.publications[0].url,'https://example.com/paper');assert.ok(merged.settings.sectionOrder.includes('publications'));assert.ok(merged.settings.hiddenSections.includes('publications'));assert.equal(merged.settings.sectionTitles.publications,'Publicaciones seleccionadas');
+  assert.equal(merged.customSections.filter(s=>s.title==='Casos especiales').length,1);assert.ok(custom.items.some(x=>x.title==='Caso A'));assert.ok(custom.items.some(x=>x.title==='Caso B'));assert.ok(merged.settings.sectionOrder.includes('custom:'+custom.id));
+});
 
 test('Merge de CV combina bullets nuevos dentro de la misma experiencia',()=>{const base=defaultResume(),incoming=structuredClone(base);incoming.experience[0].bullets.push({id:'incoming_bullet',text:'Documenté una mejora adicional validada por QA.'});incoming.experience[0].location='';const merged=mergeResumeContent(base,incoming),exp=merged.experience[0];assert.equal(exp.bullets.filter(b=>/mejora adicional/.test(b.text)).length,1);assert.equal(exp.bullets.filter(b=>/onboarding/.test(b.text)).length,1);assert.equal(exp.location,base.experience[0].location)});
 

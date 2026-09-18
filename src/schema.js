@@ -41,7 +41,8 @@ const cleanVersion=(v,prefix)=>{
   const raw=v.resume&&typeof v.resume==='object'&&!Array.isArray(v.resume)?structuredClone(v.resume):{};delete raw.versions;delete raw.autoVersions;const resume=normalizeResume(raw);resume.versions=[];resume.autoVersions=[];return {id:safeId(v.id,prefix),date:Number.isFinite(+v.date)?+v.date:Date.now(),resume};
 };
 const clampNum=(value,min,max,fallback)=>Number.isFinite(+value)?Math.max(min,Math.min(max,+value)):fallback;
-const PROFILE_SETTING_KEYS=['templateId','templateFamily','templateRisk','layout','font','accent','paper','density','fontScale','lineHeight','margin','showIcons','showPhoto','photoShape','photoPosition','photoSize','photoZoom','photoX','photoY','headerStyle','headingStyle','dividerStyle','contactStyle','sectionOrder','sectionTitles','hiddenSections','sectionColumns','pageBreakHints','activeDesignVariant','designVariants','studioPackId','pageStrategy','resumeMode','forgeRecipeId','forgeRecipeName','forgeRecipeVersion'];
+export const DESIGN_VARIANT_SETTING_KEYS=Object.freeze(['templateId','templateFamily','templateRisk','layout','font','accent','paper','density','fontScale','lineHeight','margin','showIcons','showPhoto','photoShape','photoPosition','photoSize','photoZoom','photoX','photoY','headerStyle','headingStyle','dividerStyle','contactStyle']);
+export const PROFILE_SETTING_KEYS=Object.freeze([...DESIGN_VARIANT_SETTING_KEYS,'sectionOrder','sectionTitles','hiddenSections','sectionColumns','pageBreakHints','activeDesignVariant','designVariants','studioPackId','pageStrategy','resumeMode','forgeRecipeId','forgeRecipeName','forgeRecipeVersion']);
 const cleanDesignSnapshot=(raw,defaults)=>{
   const v=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
   return {
@@ -61,7 +62,11 @@ const cleanDesignSnapshot=(raw,defaults)=>{
     photoShape:['circle','rounded','square'].includes(v.photoShape)?v.photoShape:defaults.photoShape,
     photoPosition:['left','right','center','sidebar'].includes(v.photoPosition)?v.photoPosition:defaults.photoPosition,
     photoSize:['small','medium','large'].includes(v.photoSize)?v.photoSize:defaults.photoSize,
-    photoZoom:clampNum(v.photoZoom,1,2.5,defaults.photoZoom||1),photoX:clampNum(v.photoX,-50,50,defaults.photoX||0),photoY:clampNum(v.photoY,-50,50,defaults.photoY||0)
+    photoZoom:clampNum(v.photoZoom,1,2.5,defaults.photoZoom||1),photoX:clampNum(v.photoX,-50,50,defaults.photoX||0),photoY:clampNum(v.photoY,-50,50,defaults.photoY||0),
+    headerStyle:['line','band','minimal','centered'].includes(v.headerStyle)?v.headerStyle:defaults.headerStyle,
+    headingStyle:['line','caps','pill','plain'].includes(v.headingStyle)?v.headingStyle:defaults.headingStyle,
+    dividerStyle:['solid','light','none'].includes(v.dividerStyle)?v.dividerStyle:defaults.dividerStyle,
+    contactStyle:['inline','stacked'].includes(v.contactStyle)?v.contactStyle:defaults.contactStyle
   };
 };
 const cleanProfileSettings=(raw,defaults,customMap)=>{
@@ -86,7 +91,7 @@ const cleanProfileSettings=(raw,defaults,customMap)=>{
 };
 const cleanGatePolicy=(raw,defaults)=>{const v=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};return{minAts:clampNum(v.minAts,0,100,defaults.minAts),minJobMatch:clampNum(v.minJobMatch,0,100,defaults.minJobMatch),maxPages:Math.round(clampNum(v.maxPages,1,5,defaults.maxPages)),minWriting:clampNum(v.minWriting,0,100,defaults.minWriting)}};
 const cleanTestThresholds=(raw,gate)=>{const v=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};return{minAts:clampNum(v.minAts,0,100,gate.minAts),minJobMatch:clampNum(v.minJobMatch,0,100,gate.minJobMatch),maxPages:Math.round(clampNum(v.maxPages,1,5,gate.maxPages)),expectedRisk:['any','not-high'].includes(v.expectedRisk)?v.expectedRisk:'not-high'}};
-const cleanReleaseGate=(raw)=>{const v=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{},m=v.metrics&&typeof v.metrics==='object'&&!Array.isArray(v.metrics)?v.metrics:{};return{status:['READY','REVIEW','BLOCKED'].includes(v.status)?v.status:'REVIEW',score:clampNum(v.score,0,100,0),metrics:{ats:clampNum(m.ats,0,100,0),jobMatch:m.jobMatch==null?null:clampNum(m.jobMatch,0,100,0),pages:Math.round(clampNum(m.pages,0,20,0)),writing:clampNum(m.writing,0,100,0),visualRisk:['low','medium','high'].includes(m.visualRisk)?m.visualRisk:'high',integrity:clampNum(m.integrity,0,100,0)}}};
+const cleanReleaseGate=(raw)=>{const v=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{},m=v.metrics&&typeof v.metrics==='object'&&!Array.isArray(v.metrics)?v.metrics:{};return{status:['READY','REVIEW','BLOCKED'].includes(v.status)?v.status:'REVIEW',score:clampNum(v.score,0,100,0),metrics:{ats:clampNum(m.ats,0,100,0),jobMatch:m.jobMatch==null?null:clampNum(m.jobMatch,0,100,0),pages:Math.round(clampNum(m.pages,0,20,0)),writing:clampNum(m.writing,0,100,0),visualRisk:['low','medium','high'].includes(m.visualRisk)?m.visualRisk:'high',integrity:clampNum(m.integrity,0,100,0),preflight:clampNum(m.preflight,0,100,0)}}};
 
 const cleanTarget=t=>{
   if(!t||typeof t!=='object'||Array.isArray(t))return null;
@@ -185,7 +190,7 @@ export function normalizeResume(r){
   const releaseProfiles=arr(wb.releaseProfiles).slice(0,40).map(p=>{if(!p||typeof p!=='object'||Array.isArray(p))return null;const old=String(p.id||''),id=uniqueId(old,'profile',ids);if(!profileMap.has(old))profileMap.set(old,id);return{id,name:text(p.name||'Perfil de release',100)||'Perfil de release',purpose:text(p.purpose||'general',100)||'general',createdAt:Number.isFinite(+p.createdAt)?+p.createdAt:Date.now(),updatedAt:Number.isFinite(+p.updatedAt)?+p.updatedAt:Date.now(),target:cleanTarget(p.target),settings:cleanProfileSettings(p.settings,d.settings,customMap)}}).filter(Boolean);
   const activeProfileId=profileMap.get(String(wb.activeProfileId||''))||null;
   const testCases=arr(wb.testCases).slice(0,40).map(t=>{if(!t||typeof t!=='object'||Array.isArray(t))return null;const target=cleanTarget(t.target);if(!target)return null;return{id:uniqueId(t.id,'test',ids),name:text(t.name||'Caso de prueba',120)||'Caso de prueba',createdAt:Number.isFinite(+t.createdAt)?+t.createdAt:Date.now(),target,thresholds:cleanTestThresholds(t.thresholds,gatePolicy)}}).filter(Boolean);
-  const releaseHistory=arr(wb.releaseHistory).slice(0,30).map(x=>{if(!x||typeof x!=='object'||Array.isArray(x))return null;return{id:uniqueId(x.id,'release',ids),label:text(x.label||'Release',120)||'Release',createdAt:Number.isFinite(+x.createdAt)?+x.createdAt:Date.now(),profileId:profileMap.get(String(x.profileId||''))||null,targetRole:text(x.targetRole,300),templateId:SAFE_ID.test(String(x.templateId||''))?String(x.templateId):'',gate:cleanReleaseGate(x.gate),factHash:text(x.factHash||x.factFingerprint,200)}}).filter(Boolean);
+  const releaseHistory=arr(wb.releaseHistory).slice(0,30).map(x=>{if(!x||typeof x!=='object'||Array.isArray(x))return null;return{id:uniqueId(x.id,'release',ids),label:text(x.label||'Release',120)||'Release',createdAt:Number.isFinite(+x.createdAt)?+x.createdAt:Date.now(),profileId:profileMap.get(String(x.profileId||''))||null,targetRole:text(x.targetRole,300),templateId:SAFE_ID.test(String(x.templateId||''))?String(x.templateId):'',gate:cleanReleaseGate(x.gate),factHash:text(x.factHash||x.factFingerprint,200),designHash:text(x.designHash,200),targetHash:text(x.targetHash,200),releaseHash:text(x.releaseHash,200)}}).filter(Boolean);
   const merged={
     schemaVersion:9,id:resumeId,title:text(r.title??d.title,500),summary:text(r.summary,30000),
     basics:{fullName:text(r.basics?.fullName??d.basics.fullName,500),headline:text(r.basics?.headline??d.basics.headline,500),email:text(r.basics?.email??d.basics.email,500),phone:text(r.basics?.phone??d.basics.phone,200),location:text(r.basics?.location??d.basics.location,500),linkedin:text(r.basics?.linkedin??d.basics.linkedin,2000),website:text(r.basics?.website??d.basics.website,2000),photo:cleanPhotoDataUrl(r.basics?.photo)}, locale:{language:text(r.locale?.language??d.locale.language,30),country:text(r.locale?.country??d.locale.country,30)}, target:cleanTarget(r.target),

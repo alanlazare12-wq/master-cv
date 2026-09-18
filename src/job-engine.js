@@ -1,3 +1,5 @@
+import {sectionVisible} from './section-catalog.js?v=48';
+
 const ONTOLOGY={
   javascript:['javascript','js'],typescript:['typescript','ts'],react:['react.js','reactjs','react'], 'react native':['react native'],vue:['vue.js','vuejs','vue'],angular:['angular'],
   node:['node.js','nodejs','node'],python:['python'],java:['java'],csharp:['c#','c sharp','.net','dotnet'],cpp:['c++'],go:['golang','go language'],rust:['rust'],php:['php'],ruby:['ruby'],
@@ -67,21 +69,30 @@ export function parseJobDescription(text,meta={}){
 export function resumeSkillEvidence(resume){
   const evidence=new Map();
   const add=(skill,where,text,depth=1)=>{if(!evidence.has(skill))evidence.set(skill,[]);evidence.get(skill).push({where,text,depth})};
-  (resume.skillGroups||[]).forEach(g=>(g.skills||[]).forEach(s=>canonicalSkills(s).forEach(k=>add(k,`Habilidades · ${g.name}`,s,0.55))));
-  (resume.experience||[]).forEach(e=>[e.title,e.company,...(e.bullets||[]).map(b=>b.text)].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Experiencia · ${e.title||e.company}`,t,1))));
-  (resume.projects||[]).forEach(p=>[p.name,p.role,p.description,...(p.bullets||[]).map(b=>b.text)].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Proyecto · ${p.name}`,t,.95))));
-  (resume.certifications||[]).forEach(c=>[c.name,c.issuer].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Certificación · ${c.name}`,t,.8))));
-  canonicalSkills(resume.summary||'').forEach(k=>add(k,'Perfil',resume.summary,.75));
-  for(const [key,items] of Object.entries(resume.genericSections||{})) (items||[]).forEach(it=>[it.title,it.subtitle,it.description,...(it.bullets||[])].filter(Boolean).forEach(t=>canonicalSkills(typeof t==='string'?t:t.text).forEach(k=>add(k,`Sección · ${key}`,String(t?.text||t),.8))));
+  if(sectionVisible(resume,'skills'))(resume.skillGroups||[]).forEach(g=>(g.skills||[]).forEach(s=>canonicalSkills(s).forEach(k=>add(k,`Habilidades · ${g.name}`,s,0.55))));
+  if(sectionVisible(resume,'experience'))(resume.experience||[]).forEach(e=>[e.title,e.company,...(e.bullets||[]).map(b=>b.text)].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Experiencia · ${e.title||e.company}`,t,1))));
+  if(sectionVisible(resume,'projects'))(resume.projects||[]).forEach(p=>[p.name,p.role,p.description,...(p.bullets||[]).map(b=>b.text)].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Proyecto · ${p.name}`,t,.95))));
+  if(sectionVisible(resume,'certifications'))(resume.certifications||[]).forEach(c=>[c.name,c.issuer].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Certificación · ${c.name}`,t,.8))));
+  if(sectionVisible(resume,'languages'))(resume.languages||[]).forEach(l=>[l.language,l.level].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Idioma · ${l.language}`,t,1))));
+  if(sectionVisible(resume,'achievements'))(resume.achievements||[]).forEach(a=>[a.title,a.description].filter(Boolean).forEach(t=>canonicalSkills(t).forEach(k=>add(k,`Logro · ${a.title}`,t,.8))));
+  if(sectionVisible(resume,'summary'))canonicalSkills(resume.summary||'').forEach(k=>add(k,'Perfil',resume.summary,.75));
+  for(const [key,items] of Object.entries(resume.genericSections||{}))if(sectionVisible(resume,key))(items||[]).forEach(it=>[it.title,it.subtitle,it.description,...(it.bullets||[])].filter(Boolean).forEach(t=>canonicalSkills(typeof t==='string'?t:t.text).forEach(k=>add(k,`Sección · ${key}`,String(t?.text||t),.8))));
+  (resume.customSections||[]).forEach(section=>{if(sectionVisible(resume,'custom:'+section.id))(section.items||[]).forEach(it=>[it.title,it.subtitle,it.description,...(it.bullets||[])].filter(Boolean).forEach(t=>canonicalSkills(typeof t==='string'?t:t.text).forEach(k=>add(k,`Sección · ${section.title||'Personalizada'}`,String(t?.text||t),.8))))});
   return evidence;
 }
 
 function plainResumeText(resume){
-  const xs=[resume.basics?.headline,resume.summary];
-  (resume.experience||[]).forEach(e=>xs.push(e.title,e.company,...(e.bullets||[]).map(b=>b.text)));
-  (resume.education||[]).forEach(e=>xs.push(e.degree,e.institution,e.details));
-  (resume.skillGroups||[]).forEach(g=>xs.push(...(g.skills||[])));
-  (resume.projects||[]).forEach(p=>xs.push(p.name,p.role,p.description,...(p.bullets||[]).map(b=>b.text)));
+  const xs=[resume.basics?.headline];
+  if(sectionVisible(resume,'summary'))xs.push(resume.summary);
+  if(sectionVisible(resume,'experience'))(resume.experience||[]).forEach(e=>xs.push(e.title,e.company,...(e.bullets||[]).map(b=>b.text)));
+  if(sectionVisible(resume,'education'))(resume.education||[]).forEach(e=>xs.push(e.degree,e.institution,e.details));
+  if(sectionVisible(resume,'skills'))(resume.skillGroups||[]).forEach(g=>xs.push(g.name,...(g.skills||[])));
+  if(sectionVisible(resume,'projects'))(resume.projects||[]).forEach(p=>xs.push(p.name,p.role,p.startDate,p.endDate,p.url,p.description,...(p.bullets||[]).map(b=>b.text)));
+  if(sectionVisible(resume,'certifications'))(resume.certifications||[]).forEach(c=>xs.push(c.name,c.issuer,c.date,c.url));
+  if(sectionVisible(resume,'languages'))(resume.languages||[]).forEach(l=>xs.push(l.language,l.level));
+  if(sectionVisible(resume,'achievements'))(resume.achievements||[]).forEach(a=>xs.push(a.title,a.description,a.date));
+  for(const [id,items] of Object.entries(resume.genericSections||{}))if(sectionVisible(resume,id))(items||[]).forEach(it=>xs.push(it.title,it.subtitle,it.location,it.startDate,it.endDate,it.url,it.description,...(it.bullets||[]).map(b=>typeof b==='string'?b:b?.text)));
+  (resume.customSections||[]).forEach(s=>{if(sectionVisible(resume,'custom:'+s.id))(s.items||[]).forEach(it=>xs.push(s.title,it.title,it.subtitle,it.location,it.startDate,it.endDate,it.url,it.description,...(it.bullets||[]).map(b=>typeof b==='string'?b:b?.text)))});
   return norm(xs.filter(Boolean).join(' '));
 }
 
@@ -94,9 +105,9 @@ export function matchResumeToJob(resume,job){
     if(req.type==='skill'){
       ev=evidence.get(req.concept)||[];quality=Math.max(0,...ev.map(x=>x.depth||0));status=quality>=.9?'matched':quality>=.5?'partial':'missing';
     }else if(req.type==='experience'){
-      const years=estimateYears(resume.experience||[]);quality=years>=req.value?1:(years>=Math.max(1,req.value-1) ? .55 : 0);status=quality===1?'matched':quality>0?'partial':'missing';ev=[{where:'Experiencia',text:`≈ ${years.toFixed(1)} años detectados`,depth:quality}];
+      const years=estimateYears(sectionVisible(resume,'experience')?(resume.experience||[]):[]);quality=years>=req.value?1:(years>=Math.max(1,req.value-1) ? .55 : 0);status=quality===1?'matched':quality>0?'partial':'missing';ev=[{where:'Experiencia',text:`≈ ${years.toFixed(1)} años detectados`,depth:quality}];
     }else if(req.type==='education'){
-      quality=(resume.education||[]).length?1:0;status=quality?'matched':'missing';
+      quality=sectionVisible(resume,'education')&&(resume.education||[]).length?1:0;status=quality?'matched':'missing';
     }else if(req.type==='term'){
       const present=new RegExp(`(^| )${rx(norm(req.concept))}( |$)`).test(text);quality=present?.7:0;status=present?'partial':'missing';
     }
@@ -107,5 +118,16 @@ export function matchResumeToJob(resume,job){
   return {score,requirements:out,matched:out.filter(x=>x.status==='matched'),partial:out.filter(x=>x.status==='partial'),missing:out.filter(x=>x.status==='missing'),coverage:{required:reqTotal?Math.round(reqEarned/reqTotal*100):null,preferred:prefTotal?Math.round(prefEarned/prefTotal*100):null}};
 }
 
-function estimateYears(exps){let months=0;for(const e of exps){const s=yearMonth(e.startDate),f=e.current?new Date():yearMonth(e.endDate);if(s&&f&&f>=s)months+=(f.getFullYear()-s.getFullYear())*12+f.getMonth()-s.getMonth()}return months/12}
+function estimateYears(exps){
+  const ranges=[];
+  for(const e of exps){
+    const s=yearMonth(e.startDate),f=e.current?new Date():yearMonth(e.endDate);if(!s||!f||f<s)continue;
+    ranges.push([s.getFullYear()*12+s.getMonth(),f.getFullYear()*12+f.getMonth()]);
+  }
+  ranges.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  let months=0,start=null,end=null;
+  for(const [s,f] of ranges){if(start==null){start=s;end=f;continue}if(s<=end){end=Math.max(end,f);continue}months+=Math.max(0,end-start);start=s;end=f}
+  if(start!=null)months+=Math.max(0,end-start);
+  return months/12;
+}
 function yearMonth(s){const m=String(s||'').match(/(19|20)\d{2}(?:[-/.](\d{1,2}))?/);return m?new Date(Number(m[0].slice(0,4)),Math.max(0,Number(m[2]||1)-1),1):null}

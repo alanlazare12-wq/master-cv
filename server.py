@@ -5,9 +5,10 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
+WEB_ROOT_FILES=frozenset({'index.html','styles.css','manifest.webmanifest','sw.js'})
 sys.path.insert(0,str(ROOT))
 from server_lib.resume_parser import import_resume, extract_document
-from server_lib.mcp_bridge import MAX_MCP_BODY, bridge_disable, bridge_pending, bridge_resolve, bridge_status, bridge_sync, mcp_handle
+from server_lib.mcp_bridge import MAX_MCP_BODY, bridge_disable, bridge_pending, bridge_resolve, bridge_status, bridge_sync, mcp_handle, mcp_response_protocol
 VERSION='48.0.0-personal'
 
 def _pid_is_alive(pid):
@@ -15,11 +16,35 @@ def _pid_is_alive(pid):
         pid=int(pid)
         if pid<=0:
             return False
+    except (ValueError,TypeError):
+        return False
+    if os.name=='nt':
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel32=ctypes.WinDLL('kernel32',use_last_error=True)
+            kernel32.OpenProcess.argtypes=(wintypes.DWORD,wintypes.BOOL,wintypes.DWORD)
+            kernel32.OpenProcess.restype=wintypes.HANDLE
+            kernel32.GetExitCodeProcess.argtypes=(wintypes.HANDLE,ctypes.POINTER(wintypes.DWORD))
+            kernel32.GetExitCodeProcess.restype=wintypes.BOOL
+            kernel32.CloseHandle.argtypes=(wintypes.HANDLE,)
+            kernel32.CloseHandle.restype=wintypes.BOOL
+            handle=kernel32.OpenProcess(0x1000,False,pid)
+            if not handle:
+                return ctypes.get_last_error()==5
+            try:
+                code=wintypes.DWORD()
+                return bool(kernel32.GetExitCodeProcess(handle,ctypes.byref(code))) and code.value==259
+            finally:
+                kernel32.CloseHandle(handle)
+        except (OSError,AttributeError):
+            return False
+    try:
         os.kill(pid,0)
         return True
     except PermissionError:
         return True
-    except (OSError,ValueError,TypeError):
+    except OSError:
         return False
 
 def _claim_pid_file(path):
@@ -74,6 +99,17 @@ def _model_capabilities(name):
     except Exception:
         return [],False
 
+_MODEL_CAP_CACHE={}
+_MODEL_CAP_LOCK=threading.Lock()
+
+def _model_fingerprint(item):
+    return (
+        str(item.get('name') or item.get('model') or ''),
+        str(item.get('digest') or ''),
+        str(item.get('modified_at') or ''),
+        int(item.get('size') or 0),
+    )
+
 def _local_models():
     try:
         body=_ollama_json('/api/tags',timeout=1.5)
@@ -81,8 +117,18 @@ def _local_models():
         for item in body.get('models',[])[:40]:
             name=item.get('name') or item.get('model') or ''
             if _is_local_model(name):raw.append(item)
+        active={str(item.get('name') or item.get('model') or '') for item in raw}
+        with _MODEL_CAP_LOCK:
+            for name in list(_MODEL_CAP_CACHE):
+                if name not in active:_MODEL_CAP_CACHE.pop(name,None)
         def enrich(item):
-            name=item.get('name') or item.get('model') or '';caps,known=_model_capabilities(name)
+            name=item.get('name') or item.get('model') or '';fingerprint=_model_fingerprint(item)
+            with _MODEL_CAP_LOCK:cached=_MODEL_CAP_CACHE.get(name)
+            if cached and cached[0]==fingerprint:
+                caps,known=cached[1],cached[2]
+            else:
+                caps,known=_model_capabilities(name)
+                with _MODEL_CAP_LOCK:_MODEL_CAP_CACHE[name]=(fingerprint,caps,known)
             return {'name':name,'size':item.get('size',0),'modified_at':item.get('modified_at',''),'capabilities':caps,'capabilitiesKnown':known,'vision':'vision' in caps,'embedding':('embedding' in caps or 'embeddings' in caps)}
         if not raw:return [],None
         with ThreadPoolExecutor(max_workers=min(6,len(raw))) as pool:models=list(pool.map(enrich,raw))
@@ -716,7 +762,8 @@ def _render_export_pdf(body):
     with tempfile.TemporaryDirectory(prefix='hoja-pdf-') as td:
         root=Path(td);html_path=root/'resume.html';pdf_path=root/'resume.pdf';profile=root/'browser-profile';html_path.write_text(document,encoding='utf-8')
         uri=html_path.resolve().as_uri()
-        args=[exe,'--headless=new','--disable-gpu','--disable-background-networking','--disable-sync','--no-first-run',f'--user-data-dir={profile}','--no-pdf-header-footer',f'--print-to-pdf={pdf_path}',uri]
+        elevation_args=['--do-not-de-elevate'] if os.name=='nt' and Path(exe).name.lower()=='msedge.exe' else []
+        args=[exe,'--headless=new',*elevation_args,'--disable-gpu','--disable-background-networking','--disable-sync','--no-first-run',f'--user-data-dir={profile}','--no-pdf-header-footer',f'--print-to-pdf={pdf_path}',uri]
         proc=subprocess.run(args,capture_output=True,timeout=45)
         if proc.returncode!=0 or not pdf_path.exists():raise RuntimeError('El navegador local no pudo generar el PDF.')
         data=pdf_path.read_bytes()
@@ -726,9 +773,13 @@ def _render_export_pdf(body):
 class Handler(SimpleHTTPRequestHandler):
     server_version='HojaPersonal/48'
     def translate_path(self,path):
-        raw=urllib.parse.urlparse(path).path;rel=Path(urllib.parse.unquote(raw).lstrip('/'));target=(ROOT/rel).resolve()
-        if ROOT not in target.parents and target!=ROOT:return str(ROOT/'index.html')
-        if target.is_dir():target=target/'index.html'
+        raw=urllib.parse.urlparse(path).path;decoded=urllib.parse.unquote(raw);rel=Path(decoded.lstrip('/'))
+        if decoded in {'','/'}:return str(ROOT/'index.html')
+        parts=rel.parts
+        allowed=(len(parts)==1 and parts[0] in WEB_ROOT_FILES) or (len(parts)==2 and parts[0]=='src' and parts[1].endswith('.js') and parts[1] not in {'.','..'})
+        if not allowed:return str(ROOT/'__web_asset_not_found__')
+        target=(ROOT/rel).resolve()
+        if ROOT not in target.parents:return str(ROOT/'__web_asset_not_found__')
         return str(target)
     def end_headers(self):
         self.send_header('X-Content-Type-Options','nosniff');self.send_header('X-Frame-Options','DENY');self.send_header('Referrer-Policy','no-referrer');self.send_header('Permissions-Policy','camera=(), microphone=(), geolocation=()')
@@ -736,8 +787,10 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
     def log_message(self,fmt,*args):
         if os.environ.get('HOJA_VERBOSE')=='1':super().log_message(fmt,*args)
-    def _json(self,status,payload):
-        raw=json.dumps(payload,ensure_ascii=False).encode('utf-8');self.send_response(status);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+    def _json(self,status,payload,extra_headers=None):
+        raw=json.dumps(payload,ensure_ascii=False).encode('utf-8');self.send_response(status);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Content-Length',str(len(raw)))
+        for name,value in (extra_headers or {}).items():self.send_header(str(name),str(value))
+        self.end_headers();self.wfile.write(raw)
     def _binary(self,status,data,content_type='application/octet-stream',filename=''):
         raw=bytes(data);self.send_response(status);self.send_header('Content-Type',content_type);self.send_header('Content-Length',str(len(raw)));
         if filename:self.send_header('Content-Disposition',f'attachment; filename="{_safe_pdf_filename(filename)}"')
@@ -784,7 +837,7 @@ class Handler(SimpleHTTPRequestHandler):
         url=urllib.parse.urlparse(self.path)
         if url.path=='/mcp':
             try:
-                result=mcp_handle(self._read_json(MAX_MCP_BODY),VERSION);return self._empty(202) if result is None else self._json(200,result)
+                message=self._read_json(MAX_MCP_BODY);protocol=mcp_response_protocol(message,self.headers);result=mcp_handle(message,VERSION,self.headers);headers={'MCP-Protocol-Version':protocol,'Cache-Control':'no-store'};return self._empty(202) if result is None else self._json(200,result,headers)
             except OverflowError as exc:return self._json(413,{'error':str(exc)})
             except (ValueError,json.JSONDecodeError) as exc:return self._json(400,{'error':str(exc)})
         if url.path=='/api/mcp-bridge/disable':return self._json(200,bridge_disable())

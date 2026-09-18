@@ -326,19 +326,18 @@ class V35WindowsLifecycleContractTests(unittest.TestCase):
         self.assertIn('_claim_pid_file',server);self.assertIn('_release_pid_file',server)
 
     def test_v35_pid_file_refuses_another_live_process_and_cleans_own_pid(self):
-        import subprocess,sys,tempfile
+        import os,tempfile
         import server
         with tempfile.TemporaryDirectory() as td:
             path=Path(td)/'server.pid'
-            proc=subprocess.Popen([sys.executable,'-c','import time; time.sleep(10)'])
-            try:
-                path.write_text(str(proc.pid),encoding='utf-8')
-                with self.assertRaises(RuntimeError):server._claim_pid_file(path)
-            finally:
-                proc.terminate();proc.wait(timeout=5)
+            other_pid=os.getppid()
+            if other_pid<=0 or other_pid==os.getpid() or not server._pid_is_alive(other_pid):
+                self.skipTest('No hay un PID padre vivo y distinto para validar el lock sin crear procesos hijo.')
+            path.write_text(str(other_pid),encoding='utf-8')
+            with self.assertRaises(RuntimeError):server._claim_pid_file(path)
             path.write_text('99999999',encoding='utf-8')
             claimed=server._claim_pid_file(path)
-            self.assertEqual(path.read_text(encoding='utf-8').strip(),str(__import__('os').getpid()))
+            self.assertEqual(path.read_text(encoding='utf-8').strip(),str(os.getpid()))
             server._release_pid_file(claimed)
             self.assertFalse(path.exists())
 

@@ -3,9 +3,9 @@ const clean=v=>String(v??'').trim();
 export function normalizeEvidence(items,{sourceKind='',fileName='',model=''}={}){
   return (Array.isArray(items)?items:[]).slice(0,200).map(item=>{
     if(!item||typeof item!=='object')return null;
-    const quote=clean(item.quote||item.text).slice(0,1800),field=clean(item.field||item.anchor).slice(0,180),page=Number.isFinite(+item.page)&&+item.page>0?Math.floor(+item.page):null,confidence=Number.isFinite(+item.confidence)?Math.max(0,Math.min(100,+item.confidence)):0;
+    const quote=clean(item.quote||item.text).slice(0,1800),field=clean(item.field||item.anchor).slice(0,180),page=Number.isFinite(+item.page)&&+item.page>0?Math.floor(+item.page):null,confidence=Number.isFinite(+item.confidence)?Math.max(0,Math.min(100,+item.confidence)):0,now=Date.now(),createdAt=Number.isFinite(+item.createdAt)&&+item.createdAt>0?+item.createdAt:now,updatedAt=Number.isFinite(+item.updatedAt)&&+item.updatedAt>0?+item.updatedAt:createdAt;
     if(!quote&&!field)return null;
-    return{id:clean(item.id)||uid('evidence'),type:'source',title:field||'Evidencia',text:quote,tags:['source',clean(item.sourceKind||sourceKind),model].filter(Boolean).slice(0,8),anchor:field,quote,sourceKind:clean(item.sourceKind||sourceKind).slice(0,80),fileName:clean(item.fileName||fileName).slice(0,260),page,confidence,verified:item.verified===true,createdAt:Date.now(),updatedAt:Date.now()};
+    return{id:clean(item.id)||uid('evidence'),type:'source',title:field||'Evidencia',text:quote,tags:['source',clean(item.sourceKind||sourceKind),model].filter(Boolean).slice(0,8),anchor:field,quote,sourceKind:clean(item.sourceKind||sourceKind).slice(0,80),fileName:clean(item.fileName||fileName).slice(0,260),page,confidence,verified:item.verified===true,createdAt,updatedAt};
   }).filter(Boolean);
 }
 export function evidenceForAnchor(resume,anchor){const a=clean(anchor);return (resume?.evidenceVault||[]).filter(e=>e?.anchor===a||e?.title===a)}

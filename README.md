@@ -48,8 +48,8 @@ Borradores desde PDF/DOCX/TXT/imagen pueden conservar citas, página, archivo, m
 ### Ollama local
 La app detecta capacidades con `/api/show`, puede usar visión, structured outputs y embeddings locales. El ATS semántico es complementario y nunca copia requisitos al CV.
 
-### ChatGPT Web · Secure MCP Tunnel
-Hoja Personal incluye un bridge MCP opcional en `http://127.0.0.1:4173/mcp` que **reutiliza el mismo Secure MCP Tunnel de LocalForge**. LocalForge publica las herramientas `hoja_personal.*`; ChatGPT Web puede leer un snapshot sanitizado del CV abierto y, si habilitas propuestas, enviar cambios de perfil/bullets a una bandeja local. Esas propuestas **no escriben directamente**: vuelven a pasar por el auditor factual y por aprobación en la interfaz. Hoja Personal no necesita otro Tunnel ID ni guarda la API key del túnel. El bridge ampliado permite proponer cambios estructurados en datos personales, experiencia, educación, skills, proyectos, certificaciones, idiomas, logros, vacante y diseño mediante una allowlist estricta; cada cambio requiere revisión local. Consulta `docs/CHATGPT-WEB-MCP.md`.
+### ChatGPT Web · PraxisNode · MCP
+Hoja Personal incluye un bridge MCP opcional en `http://127.0.0.1:4173/mcp`. **PraxisNode** lo conecta como External MCP dentro del run activo y, si usas ChatGPT Web, PraxisNode mantiene su propio OpenAI Secure MCP Tunnel. Master CV no ejecuta un segundo `tunnel-client`, no necesita otro Tunnel ID y no guarda la API key del túnel. El bridge expone las herramientas reales `cv_*`, usa MCP `2026-07-28` stateless con compatibilidad para clientes 2025 y permite leer un snapshot sanitizado o proponer cambios estructurados mediante una allowlist estricta. Las propuestas **nunca escriben directamente**: vuelven a pasar por auditoría y aprobación local. Consulta `docs/CHATGPT-WEB-MCP.md`.
 
 ### Preview avanzada
 - Edición WYSIWYG directa.

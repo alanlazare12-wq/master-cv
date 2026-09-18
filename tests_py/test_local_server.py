@@ -10,8 +10,9 @@ class LocalServerTests(unittest.TestCase):
     def tearDownClass(cls):cls.srv.shutdown();cls.srv.server_close()
     def get_json(self,path):
         with urllib.request.urlopen(f'http://127.0.0.1:{self.port}{path}',timeout=4) as r:return r.status,json.loads(r.read())
-    def post_json(self,path,body):
-        req=urllib.request.Request(f'http://127.0.0.1:{self.port}{path}',data=json.dumps(body).encode(),method='POST',headers={'Content-Type':'application/json'})
+    def post_json(self,path,body,headers=None):
+        request_headers={'Content-Type':'application/json'};request_headers.update(headers or {})
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}{path}',data=json.dumps(body).encode(),method='POST',headers=request_headers)
         try:
             with urllib.request.urlopen(req,timeout=4) as r:return r.status,json.loads(r.read())
         except urllib.error.HTTPError as e:return e.code,json.loads(e.read())
@@ -35,9 +36,12 @@ class LocalServerTests(unittest.TestCase):
         url=f'http://127.0.0.1:{self.port}/api/import-resume?filename=ana.txt';req=urllib.request.Request(url,data=text,method='POST',headers={'Content-Type':'text/plain'})
         with urllib.request.urlopen(req,timeout=4) as r:body=json.loads(r.read())
         self.assertEqual(body['resume']['schemaVersion'],9);self.assertEqual(body['resume']['basics']['email'],'ana@example.com');self.assertTrue(body['resume']['experience']);self.assertIn('sourceAudit',body['resume'])
-    def test_path_traversal_cannot_read_server_source(self):
-        with urllib.request.urlopen(f'http://127.0.0.1:{self.port}/%2e%2e/server.py',timeout=4) as r:body=r.read().decode('utf-8',errors='replace')
-        self.assertIn('<!doctype html>',body.lower());self.assertNotIn("OLLAMA_BASE='http://127.0.0.1:11434'",body)
+    def test_static_server_allows_only_web_assets(self):
+        for path in ['/', '/index.html', '/styles.css', '/manifest.webmanifest', '/sw.js', '/src/app.js', '/src/schema.js']:
+            with urllib.request.urlopen(f'http://127.0.0.1:{self.port}{path}',timeout=4) as response:self.assertEqual(response.status,200,path)
+        for path in ['/server.py','/README.md','/tests_py/test_local_server.py','/.git/config','/%2e%2e/server.py']:
+            with self.assertRaises(urllib.error.HTTPError,msg=path) as caught:urllib.request.urlopen(f'http://127.0.0.1:{self.port}{path}',timeout=4)
+            self.assertEqual(caught.exception.code,404,path)
     def test_security_headers(self):
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/health')
         with urllib.request.urlopen(req,timeout=4) as r:self.assertEqual(r.headers.get('X-Frame-Options'),'DENY');self.assertIn("default-src 'self'",r.headers.get('Content-Security-Policy'));self.assertTrue(r.headers.get('Server','').startswith('HojaPersonal/48'),r.headers.get('Server'))
@@ -88,6 +92,46 @@ class LocalServerTests(unittest.TestCase):
         self.post_json('/api/mcp-bridge/sync',{'tabId':'qa','mode':'read','resume':{'id':'resume-read','title':'Read','basics':{},'summary':'Solo lectura','experience':[]},'atsText':'Solo lectura','atsScore':50})
         status,tools=self.post_json('/mcp',{'jsonrpc':'2.0','id':5,'method':'tools/list','params':{}});self.assertEqual(status,200)
         names={x['name'] for x in tools['result']['tools']};self.assertIn('cv_get_current',names);self.assertIn('cv_get_bridge_status',names);self.assertIn('cv_get_edit_schema',names);self.assertNotIn('cv_propose_summary_update',names);self.assertNotIn('cv_propose_bullet_update',names);self.assertNotIn('cv_propose_edit',names)
+
+    def test_chatgpt_mcp_project_bullet_upsert_is_supported(self):
+        resume={'id':'resume-project-bullets','title':'CV','basics':{},'summary':'','experience':[],'education':[],'skillGroups':[],'projects':[{'id':'proj1','name':'Portal','role':'Dev','url':'','startDate':'2024','endDate':'','description':'','bullets':[{'id':'pb1','text':'Detalle viejo'}]}],'certifications':[],'languages':[],'achievements':[]}
+        self.post_json('/api/mcp-bridge/sync',{'tabId':'qa','mode':'approve','resume':resume,'atsText':'','atsScore':70})
+        _,upsert=self.post_json('/mcp',{'jsonrpc':'2.0','id':27,'method':'tools/call','params':{'name':'cv_propose_edit','arguments':{'op':'upsert','path':'projects.bullets','parent_id':'proj1','item_id':'pb1','value_json':'{"text":"Detalle nuevo"}'}}})
+        self.assertFalse(upsert['result']['isError'],upsert);proposal=upsert['result']['structuredContent']['proposal'];self.assertEqual(proposal['before']['text'],'Detalle viejo');self.assertEqual(proposal['after']['text'],'Detalle nuevo')
+
+    def test_chatgpt_mcp_disable_clears_stale_pending_proposals(self):
+        resume={'id':'resume-disable','title':'CV','basics':{},'summary':'Perfil','experience':[]}
+        self.post_json('/api/mcp-bridge/sync',{'tabId':'qa','mode':'approve','resume':resume,'atsText':'','atsScore':70})
+        _,queued=self.post_json('/mcp',{'jsonrpc':'2.0','id':28,'method':'tools/call','params':{'name':'cv_propose_summary_update','arguments':{'summary':'Perfil nuevo'}}});self.assertFalse(queued['result']['isError'])
+        _,before=self.get_json('/api/mcp-bridge/pending');self.assertGreater(len(before['pending']),0)
+        _,disabled=self.post_json('/api/mcp-bridge/disable',{});self.assertFalse(disabled['enabled']);self.assertEqual(disabled['pendingCount'],0)
+        _,after=self.get_json('/api/mcp-bridge/pending');self.assertEqual(after['pending'],[])
+
+    def test_v48_mcp_switching_resume_discards_pending_from_previous_resume(self):
+        resume_a={'id':'resume-a','title':'A','basics':{},'summary':'Perfil A','experience':[]}
+        resume_b={'id':'resume-b','title':'B','basics':{},'summary':'Perfil B','experience':[]}
+        self.post_json('/api/mcp-bridge/sync',{'tabId':'qa','mode':'approve','resume':resume_a,'atsText':'','atsScore':70})
+        _,queued=self.post_json('/mcp',{'jsonrpc':'2.0','id':29,'method':'tools/call','params':{'name':'cv_propose_summary_update','arguments':{'summary':'Perfil A nuevo'}}});self.assertFalse(queued['result']['isError'])
+        _,before=self.get_json('/api/mcp-bridge/pending');self.assertEqual(len(before['pending']),1);self.assertEqual(before['pending'][0]['resumeId'],'resume-a')
+        _,status=self.post_json('/api/mcp-bridge/sync',{'tabId':'qa','mode':'approve','resume':resume_b,'atsText':'','atsScore':75})
+        self.assertEqual(status['resumeId'],'resume-b');self.assertEqual(status['pendingCount'],0)
+        _,after=self.get_json('/api/mcp-bridge/pending');self.assertEqual(after['pending'],[])
+
+    def test_chatgpt_mcp_current_stateless_discovery_and_tools(self):
+        meta={'_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientInfo':{'name':'qa','version':'1.0'},'io.modelcontextprotocol/clientCapabilities':{}}}
+        status,discover=self.post_json('/mcp',{'jsonrpc':'2.0','id':30,'method':'server/discover','params':meta},{'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'server/discover'})
+        self.assertEqual(status,200);self.assertEqual(discover['result']['supportedVersions'],['2026-07-28']);self.assertEqual(discover['result']['ttlMs'],0);self.assertEqual(discover['result']['_meta']['io.modelcontextprotocol/serverInfo']['name'],'hoja-personal-cv-studio')
+        status,tools=self.post_json('/mcp',{'jsonrpc':'2.0','id':31,'method':'tools/list','params':meta},{'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/list'})
+        self.assertEqual(status,200);self.assertEqual(tools['result']['resultType'],'complete');self.assertTrue(any(x['name']=='cv_get_current' for x in tools['result']['tools']))
+
+    def test_chatgpt_mcp_current_protocol_rejects_transport_mismatch(self):
+        meta={'_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}}
+        status,body=self.post_json('/mcp',{'jsonrpc':'2.0','id':32,'method':'tools/list','params':meta},{'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call'})
+        self.assertEqual(status,200);self.assertEqual(body['error']['code'],-32602);self.assertIn('does not match',body['error']['message'])
+
+    def test_chatgpt_mcp_initialize_keeps_legacy_era_separate(self):
+        status,body=self.post_json('/mcp',{'jsonrpc':'2.0','id':33,'method':'initialize','params':{'protocolVersion':'2026-07-28','capabilities':{},'clientInfo':{'name':'legacy-probe','version':'1'}}})
+        self.assertEqual(status,200);self.assertEqual(body['result']['protocolVersion'],'2025-11-25')
 
 class LocalAiGuardUnitTests(unittest.TestCase):
     def test_server_guard_does_not_reuse_number_from_other_context_field(self):
@@ -499,12 +543,25 @@ class V44OllamaCapabilitiesAndSemanticTests(unittest.TestCase):
     def test_v44_model_capabilities_come_from_api_show(self):
         from unittest.mock import patch
         import server
+        server._MODEL_CAP_CACHE.clear()
         def fake(path,payload=None,timeout=0):
             if path=='/api/tags':return {'models':[{'name':'vision-local','size':1}]}
             if path=='/api/show':return {'capabilities':['completion','vision','embedding']}
             raise AssertionError(path)
         with patch('server._ollama_json',side_effect=fake):models,error=server._local_models()
         self.assertIsNone(error);self.assertEqual(models[0]['name'],'vision-local');self.assertTrue(models[0]['vision']);self.assertTrue(models[0]['embedding']);self.assertTrue(models[0]['capabilitiesKnown'])
+
+    def test_v48_model_capabilities_cache_reuses_unchanged_models_and_invalidates_changes(self):
+        from unittest.mock import patch
+        import server
+        server._MODEL_CAP_CACHE.clear();state={'modified':'a','show':0}
+        def fake(path,payload=None,timeout=0):
+            if path=='/api/tags':return {'models':[{'name':'cached-local','size':7,'digest':'d1','modified_at':state['modified']}]}
+            if path=='/api/show':state['show']+=1;return {'capabilities':['completion','embedding']}
+            raise AssertionError(path)
+        with patch('server._ollama_json',side_effect=fake):
+            first,_=server._local_models();second,_=server._local_models();state['modified']='b';third,_=server._local_models()
+        self.assertEqual(state['show'],2);self.assertTrue(first[0]['embedding']);self.assertTrue(second[0]['embedding']);self.assertTrue(third[0]['embedding'])
 
     def test_v44_semantic_match_uses_local_embed_without_modifying_text(self):
         from unittest.mock import patch
