@@ -91,3 +91,10 @@
 - Ajuste automático del tamaño visual del contenido para aprovechar mejor una hoja de exportación sin crear páginas extra.
 - Máximo profesional ~12.25 pt equivalentes y medición física real antes de aplicar el factor.
 - Paridad entre preview exacta, impresión clásica y PDF directo.
+
+### Aplicación de escritorio Windows
+- Nuevo shell `desktop.py` con ventana propia WebView2; el uso normal ya no abre Edge/Chrome ni muestra consola.
+- El servidor localhost continúa siendo interno y se inicia/detiene junto con la ventana.
+- Perfil WebView persistente en LocalAppData para conservar IndexedDB/localStorage entre ejecuciones.
+- PyInstaller usa subsistema Windows GUI (`--windowed`) y el setup instala el runtime Python/WebView requerido por la aplicación.
+- Smoke del setup instalado: ventana mostrada y WebView cargada, `/api/health` OK, cierre limpio del puerto y del PID file.

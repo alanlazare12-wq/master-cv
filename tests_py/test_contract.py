@@ -618,3 +618,25 @@ class V48ConcurrencyAndOfflineContractTests(unittest.TestCase):
     def test_v48_service_worker_cached_response_absorbs_background_network_rejection(self):
         sw=(ROOT/'sw.js').read_text(encoding='utf8')
         self.assertIn("if(cached){void network.catch(()=>{});return cached}",sw);self.assertIn('cachePutQuietly',sw);self.assertIn('.catch(()=>{})',sw)
+
+class DesktopPackagingContractTests(unittest.TestCase):
+    def test_desktop_shell_uses_embedded_webview_without_browser_or_console(self):
+        desktop=(ROOT/'desktop.py').read_text(encoding='utf8')
+        build=(ROOT/'tools/build-windows.ps1').read_text(encoding='utf8')
+        self.assertIn('webview.create_window(',desktop)
+        self.assertIn("gui='edgechromium'",desktop)
+        self.assertIn('private_mode=False',desktop)
+        self.assertIn('storage_path=str(storage_path)',desktop)
+        self.assertIn('server.shutdown()',desktop)
+        self.assertNotIn('webbrowser.open',desktop)
+        self.assertIn("'--windowed'",build)
+        self.assertNotIn("'--console'",build)
+        self.assertIn("'pywebview==6.2.1'",build)
+        self.assertIn("Join-Path $Root 'desktop.py'",build)
+
+    def test_desktop_shell_keeps_stable_local_origin_and_persistent_profile(self):
+        desktop=(ROOT/'desktop.py').read_text(encoding='utf8')
+        self.assertIn('DEFAULT_PORT = 4173',desktop)
+        self.assertIn("app_dir / 'WebView'",desktop)
+        self.assertIn("app_dir / 'server.pid'",desktop)
+        self.assertIn("ThreadingHTTPServer((args.host, args.port), Handler)",desktop)

@@ -80,7 +80,7 @@ if (-not $SkipAppBuild) {
     Invoke-Checked 'py.exe' '-3.14' '-m' 'venv' $VenvRoot
   }
 
-  Invoke-Checked $Python '-m' 'pip' 'install' '--disable-pip-version-check' '--upgrade' 'pyinstaller==6.22.3' 'pypdf==6.19.0'
+  Invoke-Checked $Python '-m' 'pip' 'install' '--disable-pip-version-check' '--upgrade' 'pyinstaller==6.22.3' 'pypdf==6.19.0' 'pywebview==6.2.1'
 
   Remove-Item $AppDist -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item (Join-Path $WorkRoot 'pyinstaller') -Recurse -Force -ErrorAction SilentlyContinue
@@ -91,13 +91,14 @@ if (-not $SkipAppBuild) {
     '--noconfirm',
     '--clean',
     '--onedir',
-    '--console',
+    '--windowed',
     '--name', 'MasterCVStudio',
     '--contents-directory', '.',
     '--distpath', $AppDist,
     '--workpath', (Join-Path $WorkRoot 'pyinstaller'),
     '--specpath', $WorkRoot,
     '--collect-submodules', 'pypdf',
+    '--collect-all', 'webview',
     '--add-data', "$Root\index.html;.",
     '--add-data', "$Root\styles.css;.",
     '--add-data', "$Root\manifest.webmanifest;.",
@@ -106,7 +107,7 @@ if (-not $SkipAppBuild) {
   Get-ChildItem (Join-Path $Root 'src') -Filter '*.js' -File | Sort-Object Name | ForEach-Object {
     $pyInstallerArgs += @('--add-data', "$($_.FullName);src")
   }
-  $pyInstallerArgs += (Join-Path $Root 'server.py')
+  $pyInstallerArgs += (Join-Path $Root 'desktop.py')
   Invoke-Checked $Python @pyInstallerArgs
 }
 

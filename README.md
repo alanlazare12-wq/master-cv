@@ -4,12 +4,12 @@ Aplicación local para crear, adaptar, revisar y exportar currículums desde Win
 
 ## Inicio rápido en Windows
 
-1. Descomprime el ZIP.
-2. Ejecuta `run.bat`.
-3. Abre la URL local que muestra la consola.
-4. Para detener sólo esta instancia, ejecuta `stop.bat`.
+1. Ejecuta `Hoja-Personal-CV-Studio-v48-Setup.exe`.
+2. Abre **Hoja Personal CV Studio** desde el menú Inicio o el acceso directo.
+3. La aplicación se abre en una ventana de escritorio propia; no abre Edge/Chrome y no muestra consola.
+4. El backend local se inicia y se detiene junto con la ventana. Los CV continúan guardándose localmente mediante IndexedDB/localStorage persistentes del WebView.
 
-`setup.bat` instala dependencias opcionales para importación PDF. Para PDF escaneado con IA visual, Poppler/`pdftoppm` es opcional; también puedes adjuntar las páginas como PNG/JPG.
+El paquete de escritorio usa WebView2 en Windows y conserva el servidor en `127.0.0.1` sólo como backend interno. `run.bat` / `stop.bat` quedan disponibles únicamente para desarrollo y diagnóstico manual. Para PDF escaneado con IA visual, Poppler/`pdftoppm` sigue siendo opcional; también puedes adjuntar las páginas como PNG/JPG.
 
 ## Novedad principal v48 · concurrencia y recuperación reforzadas
 
